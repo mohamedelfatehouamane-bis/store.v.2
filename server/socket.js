@@ -7,7 +7,7 @@ const { Server } = require('socket.io')
 const { createClient } = require('@supabase/supabase-js')
 const { telegramService } = require('./telegram-service')
 
-const PORT = Number(process.env.SOCKET_PORT || 3001)
+const PORT = Number(process.env.PORT || process.env.SOCKET_PORT || 3001)
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'
 const FRONTEND_ORIGIN =
   process.env.SOCKET_CORS_ORIGIN || process.env.CLIENT_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
