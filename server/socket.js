@@ -7,10 +7,14 @@ const { Server } = require('socket.io')
 const { createClient } = require('@supabase/supabase-js')
 const { telegramService } = require('./telegram-service')
 
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, service: 'socket-server' })
+})
+
 const PORT = process.env.PORT || 3001
 
 server.listen(PORT, () => {
-  console.log("Socket server listening on port", PORT)
+  console.log(`Socket server listening on port ${PORT}`)
 })
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'
 const FRONTEND_ORIGIN =
