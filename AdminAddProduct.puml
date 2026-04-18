@@ -1,0 +1,77 @@
+@startuml
+title Admin Add Product (MOHSTORE)
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 12
+hide footbox
+skinparam sequence {
+    ArrowThickness 1
+    ParticipantPadding 28
+    BoxPadding 12
+    LifeLineBorderColor #D9D9D9
+    LifeLineBackgroundColor #FAFAFA
+    ParticipantBorderColor #B8B8B8
+    ParticipantBackgroundColor #FFFFFF
+    ParticipantFontColor #1F2937
+    ActorBorderColor #B8B8B8
+    ActorBackgroundColor #FFFFFF
+    ActorFontColor #1F2937
+    ArrowColor #2D7FF9
+}
+
+actor "Admin" as A
+boundary "Frontend\n(React Dashboard)" as FE
+control "Backend\n(Next.js API)" as BE
+database "Database\n(PostgreSQL)" as DB
+
+== Open Manage Products ==
+A -> FE : Open "Manage Products" dashboard
+FE -[#2D7FF9]> BE : GET /api/games\nAuthorization: Bearer token
+
+alt No token
+    BE -[#E53935]> FE : 401 Unauthorized
+    FE -[#E53935]> A : Show auth error
+else Token exists
+    BE -> BE : Verify JWT
+    alt Role is not admin
+        BE -[#E53935]> FE : 403 Forbidden
+        FE -[#E53935]> A : Show access denied
+    else Role is admin
+        BE -[#2D7FF9]> DB : SELECT games
+        DB -[#2D7FF9]> BE : Games list
+        BE -[#43A047]> FE : 200 OK + games
+        FE -[#43A047]> A : Display add-product form
+    end
+end
+
+== Submit Product ==
+A -> FE : Fill form\nproduct name, game_id, points_price, image_file
+FE -[#2D7FF9]> BE : POST /api/admin/products
+
+alt No token
+    BE -[#E53935]> FE : 401 Unauthorized
+    FE -[#E53935]> A : Prompt login
+else Token exists
+    BE -> BE : Verify JWT + check admin role
+    alt Role is not admin
+        BE -[#E53935]> FE : 403 Forbidden
+        FE -[#E53935]> A : Show access denied
+    else Role is admin
+        BE -> BE : Validate fields\n(name, game_id, points_price, image_file <= 25MB)
+        alt Missing/invalid fields
+            BE -[#E53935]> FE : 400 Validation Error
+            FE -[#E53935]> A : Show field errors
+        else Valid payload
+            BE -[#2D7FF9]> DB : Check game exists
+            DB -[#2D7FF9]> BE : Game found
+            BE -[#2D7FF9]> DB : Insert new product
+            BE -[#2D7FF9]> DB : Insert default offer\n(points_price)
+            DB -[#2D7FF9]> BE : Insert success
+            BE -[#43A047]> FE : 201 Created\n{ product + offer }
+            FE -[#43A047]> A : "Product added successfully"
+        end
+    end
+end
+
+@enduml
