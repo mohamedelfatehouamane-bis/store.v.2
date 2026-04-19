@@ -67,6 +67,15 @@ export function useOrderChat(orderId: string | null, token: string | null) {
   // Dedup: only emit 'mark_seen' when the seen message id actually changes.
   const lastSeenIdRef = useRef('')
 
+  const isSocketAuthFailure = useCallback((connectError: Error) => {
+    const message = connectError.message || ''
+    const name = (connectError as { name?: string }).name || ''
+    const cause = (connectError as { cause?: unknown }).cause
+    const causeText = typeof cause === 'string' ? cause : ''
+    const details = `${message} ${name} ${causeText}`.toLowerCase()
+    return details.includes('unauthorized') || details.includes('jwt') || details.includes('token')
+  }, [])
+
   const parseResponseJson = useCallback(async (response: Response) => {
     const rawBody = await response.text()
     if (!rawBody) {
@@ -327,8 +336,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
       console.error('[socket] connect_error', connectError)
       setSocketStatus('disconnected')
       const message = connectError.message || 'Unable to connect to chat server'
-      const details = `${message} ${(connectError as { name?: string }).name ?? ''} ${(connectError as { cause?: unknown }).cause ?? ''}`.toLowerCase()
-      const isAuthFailure = details.includes('unauthorized') || details.includes('jwt') || details.includes('token')
+      const isAuthFailure = isSocketAuthFailure(connectError)
       setError(isAuthFailure ? 'Socket authentication failed. Please sign in again.' : message)
     }
 
@@ -500,7 +508,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
         socketRef.current = null
       }
     }
-  }, [chatAvailable, connectSocket, fetchMessages, orderId, token, upsertMessage])
+  }, [chatAvailable, connectSocket, fetchMessages, isSocketAuthFailure, orderId, token, upsertMessage])
 
   const sendMessage = useCallback(
     async (content: string) => {
