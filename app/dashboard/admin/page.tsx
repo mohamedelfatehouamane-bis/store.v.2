@@ -3,16 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { io } from 'socket.io-client'
 import { useAuth } from '@/lib/auth-context'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useSocketConnection } from '@/hooks/useSocketConnection'
 import { Loader2 } from 'lucide-react'
-
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL
-if (!SOCKET_URL) {
-  throw new Error('Missing NEXT_PUBLIC_SOCKET_URL in .env.local. Add NEXT_PUBLIC_SOCKET_URL and restart.')
-}
 
 type OrderItem = {
   id: string
@@ -92,6 +87,7 @@ function formatTimestamp(value?: string) {
 
 export default function AdminDashboardPage() {
   const router = useRouter()
+  const connectSocket = useSocketConnection()
   const { user, token, isLoading } = useAuth()
   const [orders, setOrders] = useState<OrderItem[]>([])
   const [actions, setActions] = useState<OrderActionEvent[]>([])
@@ -114,60 +110,88 @@ export default function AdminDashboardPage() {
       return
     }
 
-    setConnectionStatus('connecting')
+    let disposed = false
+    let socketCleanup: (() => void) | undefined
 
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      path: '/socket.io',
-      transports: ['polling', 'websocket'],
-    })
+    async function initializeSocket() {
+      setConnectionStatus('connecting')
+      const socket = await connectSocket({ path: '/socket.io' })
 
-    socket.on('connect', () => {
-      setConnectionStatus('connected')
-      console.debug('[admin socket] connected', socket.id)
-    })
-
-    socket.on('connect_error', (err) => {
-      setConnectionStatus('disconnected')
-      console.error('[admin socket] connect error', err)
-    })
-
-    socket.on('order_action', (event: OrderActionEvent) => {
-      setActions((current) => [...current.slice(-9), event])
-
-      setOrders((current) => {
-        const updated = current.map((order) => {
-          if (order.id !== event.orderId) return order
-
-          if (event.action === 'complete_order') {
-            return { ...order, status: 'completed' }
-          }
-          if (event.action === 'accept_order') {
-            return { ...order, status: 'in_progress' }
-          }
-          if (event.action === 'cancel_order') {
-            return { ...order, status: 'cancelled' }
-          }
-          return order
-        })
-
-        if (current.some((order) => order.id === event.orderId)) {
-          setHighlightedOrderId(event.orderId)
+      if (!socket) {
+        if (!disposed) {
+          setConnectionStatus('disconnected')
         }
+        return
+      }
 
-        return updated
-      })
-    })
+      if (disposed) {
+        socket.disconnect()
+        return
+      }
 
-    socket.on('disconnect', () => {
-      setConnectionStatus('disconnected')
-      console.debug('[admin socket] disconnected')
-    })
+      const onConnect = () => {
+        setConnectionStatus('connected')
+        console.debug('[admin socket] connected', socket.id)
+      }
+
+      const onConnectError = (err: Error) => {
+        setConnectionStatus('disconnected')
+        console.error('[admin socket] connect error', err)
+      }
+
+      const onOrderAction = (event: OrderActionEvent) => {
+        setActions((current) => [...current.slice(-9), event])
+
+        setOrders((current) => {
+          const updated = current.map((order) => {
+            if (order.id !== event.orderId) return order
+
+            if (event.action === 'complete_order') {
+              return { ...order, status: 'completed' as const }
+            }
+            if (event.action === 'accept_order') {
+              return { ...order, status: 'in_progress' as const }
+            }
+            if (event.action === 'cancel_order') {
+              return { ...order, status: 'cancelled' as const }
+            }
+            return order
+          })
+
+          if (current.some((order) => order.id === event.orderId)) {
+            setHighlightedOrderId(event.orderId)
+          }
+
+          return updated
+        })
+      }
+
+      const onDisconnect = () => {
+        setConnectionStatus('disconnected')
+        console.debug('[admin socket] disconnected')
+      }
+
+      socket.on('connect', onConnect)
+      socket.on('connect_error', onConnectError)
+      socket.on('order_action', onOrderAction)
+      socket.on('disconnect', onDisconnect)
+
+      socketCleanup = () => {
+        socket.off('connect', onConnect)
+        socket.off('connect_error', onConnectError)
+        socket.off('order_action', onOrderAction)
+        socket.off('disconnect', onDisconnect)
+        socket.disconnect()
+      }
+    }
+
+    void initializeSocket()
 
     return () => {
-      socket.disconnect()
+      disposed = true
+      socketCleanup?.()
     }
-  }, [isLoading, router, token, user])
+  }, [connectSocket, isLoading, router, token, user])
 
   useEffect(() => {
     if (!user) return

@@ -1,10 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { io, Socket } from 'socket.io-client'
+import { Socket } from 'socket.io-client'
+import { useSocketConnection } from '@/hooks/useSocketConnection'
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL
-if (!SOCKET_URL) {
-  throw new Error('Missing NEXT_PUBLIC_SOCKET_URL in .env.local. Add NEXT_PUBLIC_SOCKET_URL and restart the dev server.')
-}
 
 export interface ChatMessage {
   id: string
@@ -38,6 +35,7 @@ export interface OrderActionEvent {
 }
 
 export function useOrderChat(orderId: string | null, token: string | null) {
+  const connectSocket = useSocketConnection()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -280,18 +278,8 @@ export function useOrderChat(orderId: string | null, token: string | null) {
   useEffect(() => {
     if (!orderId || !token || !chatAvailable) return
 
-    setSocketStatus('connecting')
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      path: '/socket.io',
-      transports: ['polling', 'websocket'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5,
-    })
-
-    socketRef.current = socket
+    let disposed = false
+    let socket: Socket | undefined
 
     const onJoin = (response?: {
       success?: boolean
@@ -304,7 +292,9 @@ export function useOrderChat(orderId: string | null, token: string | null) {
         if (Array.isArray(response.onlineUserIds)) {
           setOnlineUserIds(response.onlineUserIds)
         }
-        void flushQueuedMessages(socket)
+        if (socket) {
+          void flushQueuedMessages(socket)
+        }
         return
       }
 
@@ -321,6 +311,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
     }
 
     const onConnect = () => {
+      if (!socket) return
       console.debug('[socket] connected', socket.id)
       setSocketStatus('connected')
       socket.emit('join_order', orderId, onJoin)
@@ -335,7 +326,8 @@ export function useOrderChat(orderId: string | null, token: string | null) {
     const onConnectError = (connectError: Error) => {
       console.error('[socket] connect_error', connectError)
       setSocketStatus('disconnected')
-      setError(connectError.message || 'Unable to connect to chat server')
+      const message = connectError.message || 'Unable to connect to chat server'
+      setError(message.toLowerCase().includes('unauthorized') ? 'Socket authentication failed. Please sign in again.' : message)
     }
 
     const onReconnectAttempt = () => {
@@ -430,22 +422,52 @@ export function useOrderChat(orderId: string | null, token: string | null) {
       })
     }
 
-    socket.on('connect', onConnect)
-    socket.on('connect_error', onConnectError)
-    socket.on('disconnect', onDisconnect)
-    socket.on('error', onServerError)
-    socket.on('new_message', onNewMessage)
-    socket.on('user_online', onUserOnline)
-    socket.on('user_offline', onUserOffline)
-    socket.on('typing', onTyping)
-    socket.on('typing_stop', onTypingStop)
-    socket.on('messages_seen', onMessagesSeen)
-    socket.on('order_action', onOrderAction)
-    socket.on('reconnect_attempt', onReconnectAttempt)
-    socket.on('reconnect_error', onReconnectError)
-    socket.on('reconnect_failed', onReconnectFailed)
+    async function initializeSocket() {
+      setSocketStatus('connecting')
+      const nextSocket = await connectSocket({
+        path: '/socket.io',
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: 5,
+      })
+
+      if (!nextSocket) {
+        if (!disposed) {
+          setSocketStatus('disconnected')
+          setConnected(false)
+        }
+        return
+      }
+
+      if (disposed) {
+        nextSocket.disconnect()
+        return
+      }
+
+      socket = nextSocket
+      socketRef.current = socket
+      socket.on('connect', onConnect)
+      socket.on('connect_error', onConnectError)
+      socket.on('disconnect', onDisconnect)
+      socket.on('error', onServerError)
+      socket.on('new_message', onNewMessage)
+      socket.on('user_online', onUserOnline)
+      socket.on('user_offline', onUserOffline)
+      socket.on('typing', onTyping)
+      socket.on('typing_stop', onTypingStop)
+      socket.on('messages_seen', onMessagesSeen)
+      socket.on('order_action', onOrderAction)
+      socket.on('reconnect_attempt', onReconnectAttempt)
+      socket.on('reconnect_error', onReconnectError)
+      socket.on('reconnect_failed', onReconnectFailed)
+    }
+
+    void initializeSocket()
 
     return () => {
+      disposed = true
+      if (!socket) return
       typingTimeoutsRef.current.forEach((t) => {
         window.clearTimeout(t)
       })
@@ -476,7 +498,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
         socketRef.current = null
       }
     }
-  }, [chatAvailable, fetchMessages, orderId, token, upsertMessage])
+  }, [chatAvailable, connectSocket, fetchMessages, orderId, token, upsertMessage])
 
   const sendMessage = useCallback(
     async (content: string) => {
