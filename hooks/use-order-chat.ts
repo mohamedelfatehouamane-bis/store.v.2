@@ -327,7 +327,9 @@ export function useOrderChat(orderId: string | null, token: string | null) {
       console.error('[socket] connect_error', connectError)
       setSocketStatus('disconnected')
       const message = connectError.message || 'Unable to connect to chat server'
-      setError(message.toLowerCase().includes('unauthorized') ? 'Socket authentication failed. Please sign in again.' : message)
+      const details = `${message} ${(connectError as { name?: string }).name ?? ''} ${(connectError as { cause?: unknown }).cause ?? ''}`.toLowerCase()
+      const isAuthFailure = details.includes('unauthorized') || details.includes('jwt') || details.includes('token')
+      setError(isAuthFailure ? 'Socket authentication failed. Please sign in again.' : message)
     }
 
     const onReconnectAttempt = () => {

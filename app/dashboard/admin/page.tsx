@@ -36,6 +36,12 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 }
 
+const ACTION_STATUS_UPDATES: Record<string, OrderItem['status']> = {
+  accept_order: 'in_progress',
+  complete_order: 'completed',
+  cancel_order: 'cancelled',
+}
+
 function getStatusBadge(status: OrderItem['status']) {
   switch (status) {
     case 'pending':
@@ -146,16 +152,8 @@ export default function AdminDashboardPage() {
           const updated = current.map((order) => {
             if (order.id !== event.orderId) return order
 
-            if (event.action === 'complete_order') {
-              return { ...order, status: 'completed' as const }
-            }
-            if (event.action === 'accept_order') {
-              return { ...order, status: 'in_progress' as const }
-            }
-            if (event.action === 'cancel_order') {
-              return { ...order, status: 'cancelled' as const }
-            }
-            return order
+            const nextStatus = ACTION_STATUS_UPDATES[event.action]
+            return nextStatus ? { ...order, status: nextStatus } : order
           })
 
           if (current.some((order) => order.id === event.orderId)) {
