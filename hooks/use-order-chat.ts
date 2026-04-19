@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Socket } from 'socket.io-client'
 import { useSocketConnection } from '@/hooks/useSocketConnection'
 
+const SOCKET_AUTH_ERROR_MESSAGE = 'Socket authentication failed. Please sign in again.'
+
 
 export interface ChatMessage {
   id: string
@@ -337,7 +339,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
       setSocketStatus('disconnected')
       const message = connectError.message || 'Unable to connect to chat server'
       const isAuthFailure = isSocketAuthFailure(connectError)
-      setError(isAuthFailure ? 'Socket authentication failed. Please sign in again.' : message)
+      setError(isAuthFailure ? SOCKET_AUTH_ERROR_MESSAGE : message)
     }
 
     const onReconnectAttempt = () => {
