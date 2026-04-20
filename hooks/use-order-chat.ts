@@ -2,6 +2,29 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Socket } from 'socket.io-client'
 import { useSocketConnection } from '@/hooks/useSocketConnection'
 
+// ✅ REQUIRED EXPORTS (fix your build error)
+export const ORDER_ACTIONS = {
+  ACCEPT_ORDER: 'accept_order',
+  COMPLETE_ORDER: 'complete_order',
+  CANCEL_ORDER: 'cancel_order',
+  REPORT_DISPUTE: 'report_dispute',
+  VALIDATE_ORDER: 'validate_order',
+  TOPUP_REQUEST: 'topup_request',
+  WITHDRAW_REQUEST: 'withdraw_request',
+} as const
+
+export type OrderActionType =
+  (typeof ORDER_ACTIONS)[keyof typeof ORDER_ACTIONS]
+
+export interface OrderActionEvent {
+  orderId: string
+  action: OrderActionType
+  data?: unknown
+  userId: string
+  username: string
+  created_at?: string
+}
+
 export interface ChatMessage {
   id: string
   content: string
@@ -22,7 +45,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
 
   const socketRef = useRef<Socket | null>(null)
 
-  // ✅ Parse response safely
+  // ✅ Safe JSON parser
   const parseResponseJson = useCallback(async (response: Response) => {
     const text = await response.text()
     if (!text) return {}
@@ -34,7 +57,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
     }
   }, [])
 
-  // ✅ FIXED FETCH FUNCTION
+  // ✅ FIXED FETCH
   const fetchMessages = useCallback(async () => {
     if (!orderId || !token) {
       setLoading(false)
@@ -53,7 +76,6 @@ export function useOrderChat(orderId: string | null, token: string | null) {
         return
       }
 
-      // ✅ IMPORTANT FIX
       const response = await fetch(`${API}/api/orders/${orderId}/messages`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -76,12 +98,12 @@ export function useOrderChat(orderId: string | null, token: string | null) {
     }
   }, [orderId, token, parseResponseJson])
 
-  // ✅ INITIAL LOAD
+  // ✅ Initial load
   useEffect(() => {
     fetchMessages()
   }, [fetchMessages])
 
-  // ✅ SOCKET CONNECTION
+  // ✅ Socket connection
   useEffect(() => {
     if (!orderId || !token) return
 
@@ -98,7 +120,6 @@ export function useOrderChat(orderId: string | null, token: string | null) {
       socket.on("connect", () => {
         console.log("✅ Socket connected")
         setConnected(true)
-
         socket.emit("join_order", orderId)
       })
 
@@ -109,6 +130,10 @@ export function useOrderChat(orderId: string | null, token: string | null) {
 
       socket.on("new_message", (msg: ChatMessage) => {
         setMessages((prev) => [...prev, msg])
+      })
+
+      socket.on("connect_error", (err) => {
+        console.error("Socket error:", err)
       })
     }
 
