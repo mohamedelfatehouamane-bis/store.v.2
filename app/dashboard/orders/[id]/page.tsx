@@ -732,7 +732,7 @@ const OrderMessages = memo(function OrderMessages({
               )}
             </div>
 
-            {!connected && (
+            {!connected && socketStatus !== 'disconnected' && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
                 Connecting to chat server...
               </div>

@@ -4,7 +4,6 @@ import { useSocketConnection } from '@/hooks/useSocketConnection'
 
 const SOCKET_AUTH_ERROR_MESSAGE = 'Socket authentication failed. Please sign in again.'
 
-
 export interface ChatMessage {
   id: string
   content: string
