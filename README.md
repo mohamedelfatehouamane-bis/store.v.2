@@ -35,12 +35,42 @@ MOHSTORE uses a unique **order picking system**:
 
 ## Tech Stack
 
-- **Frontend**: Next.js 16, React 19, TypeScript
+- **Frontend**: Next.js 16, React 19, TypeScript — deployed on **Vercel**
+- **Backend**: Express + Socket.io (standalone server) — deployed on **Render**
 - **UI Components**: shadcn/ui with Tailwind CSS
-- **Backend**: Next.js API Routes
-- **Database**: MySQL with connection pooling
+- **Database / Auth**: Supabase (PostgreSQL + Auth)
 - **Authentication**: JWT tokens with bcryptjs
 - **Charts**: Recharts for data visualization
+
+## Production Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│  Vercel (frontend)                              │
+│  Next.js 16 + React 19                         │
+│  ├── app/         (pages & layouts)             │
+│  ├── app/api/     (Next.js API routes)          │
+│  ├── hooks/       (useSocketConnection, etc.)   │
+│  └── lib/         (Supabase client, auth, etc.) │
+└──────────────────┬──────────────────────────────┘
+                   │ NEXT_PUBLIC_SOCKET_URL
+                   ▼
+┌─────────────────────────────────────────────────┐
+│  Render (backend)                               │
+│  Express + Socket.io                           │
+│  └── backend/server.js                         │
+└─────────────────────────────────────────────────┘
+```
+
+**Frontend** (Next.js on Vercel):
+- All pages and UI live in `app/`
+- REST API handled by Next.js API routes in `app/api/`
+- Socket client connects to backend using `NEXT_PUBLIC_SOCKET_URL`
+
+**Backend** (Express + Socket.io on Render):
+- Standalone Node.js server in `backend/server.js`
+- Handles all real-time chat and order-action events via Socket.io
+- Exposes `GET /health` for uptime monitoring
 
 ## Project Structure
 
@@ -128,46 +158,63 @@ MOHSTORE uses a unique **order picking system**:
 
 ### Prerequisites
 - Node.js 18+
-- MySQL 8.0+
-- pnpm or npm
+- A Supabase project
 
 ### Installation
 
-1. **Clone & Install Dependencies**
+1. **Clone & Install frontend dependencies**
    ```bash
    npm install
-   # or
-   pnpm install
    ```
 
-2. **Set Up Database**
+2. **Configure frontend environment variables**
    ```bash
-   # Create database
-   mysql -u root -p < scripts/01-init-schema.sql
+   cp .env.local.example .env.local
+   # Fill in NEXT_PUBLIC_SOCKET_URL, NEXT_PUBLIC_SUPABASE_URL, etc.
    ```
 
-3. **Configure Environment Variables**
-   Create `.env.local`:
-   ```
-   DB_HOST=localhost
-   DB_USER=root
-   DB_PASSWORD=your_password
-   DB_NAME=mohstore
-   JWT_SECRET=your-secret-key-change-this
-   ENCRYPTION_KEY=your-encryption-key-change-this
-   ```
-
-4. **Run Development Server**
+3. **Install backend dependencies**
    ```bash
+   cd backend
+   npm install
+   ```
+
+4. **Configure backend environment variables**
+   ```bash
+   cp backend/.env.example backend/.env
+   # Fill in PORT, JWT_SECRET, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, etc.
+   ```
+
+5. **Run both servers in separate terminals**
+   ```bash
+   # Terminal 1 — Next.js frontend
    npm run dev
-   # or
-   pnpm dev
+
+   # Terminal 2 — Express + Socket.io backend
+   npm run backend:dev
    ```
 
-5. **Access the App**
+6. **Access the App**
    - Landing Page: http://localhost:3000
    - Auth: http://localhost:3000/auth/login
    - Dashboard: http://localhost:3000/dashboard
+   - Socket server: http://localhost:3001/health
+
+## Deployment
+
+### Frontend → Vercel
+1. Push the repository to GitHub
+2. Import the project in [Vercel](https://vercel.com)
+3. Set environment variables from `.env.local.example` in the Vercel dashboard
+4. Vercel auto-deploys on every push to `main`
+
+### Backend → Render
+1. Create a new **Web Service** on [Render](https://render.com)
+2. Set the **Root Directory** to `backend`
+3. Set **Build Command** to `npm install`
+4. Set **Start Command** to `node server.js`
+5. Add environment variables from `backend/.env.example` in the Render dashboard
+6. After deploy, copy the Render URL and set it as `NEXT_PUBLIC_SOCKET_URL` in Vercel
 
 ## API Endpoints (Order Picking Model)
 
@@ -253,22 +300,6 @@ npm run test
 # Run with coverage
 npm run test:coverage
 ```
-
-## Deployment
-
-### Vercel Deployment
-```bash
-# Push to GitHub
-git push origin main
-
-# Vercel auto-deploys on push
-# Set environment variables in Vercel dashboard
-```
-
-### Manual Deployment
-1. Build the project: `npm run build`
-2. Start production server: `npm start`
-3. Use PM2 or similar for process management
 
 ## Contributing
 
