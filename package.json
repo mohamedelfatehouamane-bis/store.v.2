@@ -7,8 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "backend:dev": "node backend/server.js",
-    "socket:dev": "node server/socket.js"
+    "backend:dev": "node backend/server.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

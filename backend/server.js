@@ -11,11 +11,10 @@ const { telegramService } = require('./telegram-service')
 
 const PORT = Number(process.env.PORT || 3001)
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'
-const FRONTEND_ORIGIN =
-  process.env.SOCKET_CORS_ORIGIN || process.env.CLIENT_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+// SOCKET_CORS_ORIGIN is the primary variable; falls back to localhost for local dev only
+const FRONTEND_ORIGIN = process.env.SOCKET_CORS_ORIGIN || 'http://localhost:3000'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseServiceRoleKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 const ORDER_ACTIONS = {
   ACCEPT_ORDER: 'accept_order',
