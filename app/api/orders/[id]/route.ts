@@ -20,6 +20,111 @@ function normalizeOrderStatus(status: string) {
   return status
 }
 
+function getCancellationRefundAmount(order: any) {
+  const orderAmount = Number(order.points_amount ?? 0)
+  const platformFee = Number(order.platform_fee ?? 0)
+  return orderAmount + platformFee
+}
+
+async function hasCancellationRefund(orderId: string) {
+  const { data, error } = await supabase
+    .from('point_transactions')
+    .select('id')
+    .eq('reference_id', orderId)
+    .or('transaction_type.eq.refund,type.eq.refund')
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Cancellation refund lookup error:', error)
+    return false
+  }
+
+  return Boolean(data)
+}
+
+async function refundCancelledOrder(order: any) {
+  const refundAmount = getCancellationRefundAmount(order)
+
+  if (refundAmount <= 0 || !order.customer_id) {
+    return { success: true }
+  }
+
+  const { data: customer, error: customerError } = await supabase
+    .from('users')
+    .select('id, points, telegram_id')
+    .eq('id', order.customer_id)
+    .single()
+
+  if (customerError || !customer) {
+    return { success: false, error: 'Customer not found for refund' }
+  }
+
+  const previousPoints = Number(customer.points ?? 0)
+  const newPoints = previousPoints + refundAmount
+
+  const { error: userUpdateError } = await supabase
+    .from('users')
+    .update({ points: newPoints })
+    .eq('id', customer.id)
+
+  if (userUpdateError) {
+    console.error('Cancellation refund update error:', userUpdateError)
+    return { success: false, error: 'Unable to refund customer points' }
+  }
+
+  const transactionAttempts = [
+    {
+      user_id: customer.id,
+      amount: refundAmount,
+      transaction_type: 'refund',
+      status: 'completed',
+      reference_id: order.id,
+      related_order_id: order.id,
+      description: 'Refund after order cancellation',
+      balance_before: previousPoints,
+      balance_after: newPoints,
+    },
+    {
+      user_id: customer.id,
+      amount: refundAmount,
+      type: 'refund',
+      status: 'completed',
+      reference_id: order.id,
+      related_order_id: order.id,
+    },
+    {
+      user_id: customer.id,
+      amount: refundAmount,
+      status: 'completed',
+      reference_id: order.id,
+    },
+  ]
+
+  for (const payload of transactionAttempts) {
+    const { error: txError } = await supabase
+      .from('point_transactions')
+      .insert(payload)
+
+    if (!txError) {
+      break
+    }
+  }
+
+  if (customer.telegram_id) {
+    void telegramService
+      .sendMessage(
+        customer.telegram_id,
+        telegramService.pointsTransactionMessage(refundAmount, newPoints)
+      )
+      .catch((err) => {
+        console.warn('[Orders][Cancel] Telegram refund notify skipped:', err instanceof Error ? err.message : String(err))
+      })
+  }
+
+  return { success: true }
+}
+
 async function releaseOrderFunds(order: any) {
   if (!order.assigned_seller_id) {
     return { success: false, error: 'Order has no assigned seller' }
@@ -431,7 +536,7 @@ async function updateOrderStatus(
     // 🔍 Get order
     const { data: order, error } = await supabase
       .from('orders')
-      .select('customer_id, assigned_seller_id, status')
+      .select('customer_id, assigned_seller_id, status, points_amount, platform_fee')
       .eq('id', id)
       .single()
 
@@ -456,7 +561,9 @@ async function updateOrderStatus(
     }
 
     if (normalizedStatus === 'cancelled') {
-      if (order.status === 'cancelled') {
+      const alreadyRefunded = await hasCancellationRefund(id)
+
+      if (order.status === 'cancelled' && alreadyRefunded) {
         return NextResponse.json({ error: 'Order is already cancelled' }, { status: 400 })
       }
 
@@ -572,12 +679,29 @@ async function updateOrderStatus(
     }
 
     if (normalizedStatus === 'cancelled') {
+      const refundAlreadyRecorded = await hasCancellationRefund(id)
+
+      if (!refundAlreadyRecorded) {
+        const refundResult = await refundCancelledOrder(order)
+        if (!refundResult.success) {
+          console.error('Cancellation refund failed:', refundResult.error)
+          return NextResponse.json(
+            { error: refundResult.error || 'Order cancelled but refund failed' },
+            { status: 500 }
+          )
+        }
+      }
+
       await addOrderEvent(supabase, {
         orderId: id,
         type: 'cancelled',
         message: `Order cancelled: ${cancel_reason?.trim() ?? 'No reason provided'}`,
         userId: auth.id,
       })
+    }
+
+    if (normalizedStatus === 'cancelled') {
+      // Cancellation refunds are handled above so the customer gets points back.
     }
 
     const recipients: Array<string> = []
