@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+  import { useEffect, useState, useCallback, useRef } from 'react'
 import { Socket } from 'socket.io-client'
 import { useSocketConnection } from '@/hooks/useSocketConnection'
 
@@ -106,7 +106,7 @@ export function useOrderChat(orderId: string | null, token: string | null) {
 
       setError('')
       setChatAvailable(true)
-      const response = await fetch(`/api/orders/${orderId}/messages`, {
+     fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/orders/${orderId}/messages`, {
         headers: { Authorization: `Bearer ${token}` },
       })
 
