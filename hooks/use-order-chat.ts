@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Socket } from 'socket.io-client'
-import { useSocketConnection } from '@/hooks/useSocketConnection'
+import { io, Socket } from 'socket.io-client'
 
-// ✅ REQUIRED EXPORTS (fix your build error)
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL
+
 export const ORDER_ACTIONS = {
   ACCEPT_ORDER: 'accept_order',
   COMPLETE_ORDER: 'complete_order',
@@ -35,29 +35,24 @@ export interface ChatMessage {
   }
 }
 
-export function useOrderChat(orderId: string | null, token: string | null) {
-  const connectSocket = useSocketConnection()
+type SocketStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 
+export function useOrderChat(orderId: string | null, token: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [chatAvailable, setChatAvailable] = useState(true)
   const [connected, setConnected] = useState(false)
+  const [socketStatus, setSocketStatus] = useState<SocketStatus>('disconnected')
+  const [typingUsers, setTypingUsers] = useState<{ userId: string; username: string }[]>([])
+  const [onlineUserIds, setOnlineUserIds] = useState<string[]>([])
+  const [orderActions, setOrderActions] = useState<OrderActionEvent[]>([])
+  // No client-side message queue is implemented; kept for API compatibility with the page component.
+  const queuedMessageCount = 0
 
   const socketRef = useRef<Socket | null>(null)
 
-  // ✅ Safe JSON parser
-  const parseResponseJson = useCallback(async (response: Response) => {
-    const text = await response.text()
-    if (!text) return {}
-
-    try {
-      return JSON.parse(text)
-    } catch {
-      throw new Error('Invalid JSON response')
-    }
-  }, [])
-
-  // ✅ FIXED FETCH
+  // Fetch messages from the built-in Next.js API route (relative URL)
   const fetchMessages = useCallback(async () => {
     if (!orderId || !token) {
       setLoading(false)
@@ -68,88 +63,183 @@ export function useOrderChat(orderId: string | null, token: string | null) {
       setLoading(true)
       setError('')
 
-      const API = process.env.NEXT_PUBLIC_API_URL
-
-      if (!API) {
-        console.error("❌ API URL missing")
-        setError("API not configured")
-        return
-      }
-
-      const response = await fetch(`${API}/api/orders/${orderId}/messages`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const response = await fetch(`/api/orders/${orderId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
       })
 
-      const data = await parseResponseJson(response)
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to load messages')
+      const text = await response.text()
+      let data: Record<string, unknown> = {}
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          throw new Error('Invalid JSON response from messages API')
+        }
       }
 
-      setMessages(data.messages || [])
+      if (!response.ok || !data.success) {
+        throw new Error((data.error as string) || 'Failed to load messages')
+      }
 
+      setChatAvailable(data.chat_configured !== false)
+      setMessages((data.messages as ChatMessage[]) ?? [])
     } catch (err) {
-      console.error("Fetch error:", err)
-      setError(err instanceof Error ? err.message : "Unknown error")
+      console.error('[Chat] Fetch messages error:', err)
+      setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
-  }, [orderId, token, parseResponseJson])
+  }, [orderId, token])
 
-  // ✅ Initial load
   useEffect(() => {
     fetchMessages()
   }, [fetchMessages])
 
-  // ✅ Socket connection
+  // Socket connection using the custom JWT token passed in from localStorage
   useEffect(() => {
     if (!orderId || !token) return
 
-    let socket: Socket | null = null
-
-    async function initSocket() {
-      const s = await connectSocket()
-
-      if (!s) return
-
-      socket = s
-      socketRef.current = socket
-
-      socket.on("connect", () => {
-        console.log("✅ Socket connected")
-        setConnected(true)
-        socket.emit("join_order", orderId)
-      })
-
-      socket.on("disconnect", () => {
-        console.log("❌ Socket disconnected")
-        setConnected(false)
-      })
-
-      socket.on("new_message", (msg: ChatMessage) => {
-        setMessages((prev) => [...prev, msg])
-      })
-
-      socket.on("connect_error", (err) => {
-        console.error("Socket error:", err)
-      })
+    if (!SOCKET_URL) {
+      console.error('[Socket] Missing NEXT_PUBLIC_SOCKET_URL')
+      return
     }
 
-    initSocket()
+    setSocketStatus('connecting')
+
+    const socket = io(SOCKET_URL, {
+      auth: { token },
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    })
+
+    socketRef.current = socket
+
+    socket.on('connect', () => {
+      setConnected(true)
+      setSocketStatus('connected')
+      socket.emit('join_order', orderId, (ack: { success?: boolean; onlineUserIds?: string[]; error?: string }) => {
+        if (ack?.error) {
+          console.error('[Socket] join_order failed:', ack.error)
+          return
+        }
+        if (ack?.onlineUserIds) {
+          setOnlineUserIds(ack.onlineUserIds)
+        }
+      })
+    })
+
+    socket.on('disconnect', () => {
+      setConnected(false)
+      setSocketStatus('disconnected')
+    })
+
+    socket.on('connect_error', (err) => {
+      console.error('[Socket] connect_error:', err)
+      setSocketStatus('disconnected')
+    })
+
+    socket.io.on('reconnect_attempt', () => {
+      setSocketStatus('reconnecting')
+    })
+
+    socket.on('new_message', (msg: ChatMessage) => {
+      setMessages((prev) => [...prev, msg])
+    })
+
+    socket.on('order_action', (event: OrderActionEvent) => {
+      setOrderActions((prev) => [...prev, event])
+    })
+
+    socket.on('typing', ({ userId, username }: { userId: string; username: string }) => {
+      setTypingUsers((prev) =>
+        prev.some((u) => u.userId === userId) ? prev : [...prev, { userId, username }]
+      )
+    })
+
+    socket.on('typing_stop', ({ userId }: { userId: string }) => {
+      setTypingUsers((prev) => prev.filter((u) => u.userId !== userId))
+    })
+
+    socket.on('user_online', ({ userId }: { userId: string }) => {
+      setOnlineUserIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]))
+    })
+
+    socket.on('user_offline', ({ userId }: { userId: string }) => {
+      setOnlineUserIds((prev) => prev.filter((id) => id !== userId))
+    })
 
     return () => {
-      if (socket) {
-        socket.disconnect()
-      }
+      socket.disconnect()
+      socketRef.current = null
     }
-  }, [orderId, token, connectSocket])
+  }, [orderId, token])
+
+  const sendMessage = useCallback(
+    async (content: string): Promise<ChatMessage | null> => {
+      const socket = socketRef.current
+      if (!socket || !orderId) return null
+
+      return new Promise((resolve) => {
+        socket.emit(
+          'send_message',
+          { orderId, message: content },
+          (ack: { success: boolean; message?: ChatMessage; error?: string }) => {
+            if (ack?.success && ack.message) {
+              resolve(ack.message)
+            } else {
+              console.error('[Chat] Send message failed:', ack?.error)
+              resolve(null)
+            }
+          }
+        )
+      })
+    },
+    [orderId]
+  )
+
+  const sendOrderAction = useCallback(
+    async (action: OrderActionType, data?: unknown): Promise<void> => {
+      const socket = socketRef.current
+      if (!socket || !orderId) return
+
+      return new Promise((resolve, reject) => {
+        socket.emit(
+          'order_action',
+          { orderId, action, data },
+          (ack: { success: boolean; error?: string }) => {
+            if (ack?.success) {
+              resolve()
+            } else {
+              reject(new Error(ack?.error || 'Failed to send order action'))
+            }
+          }
+        )
+      })
+    },
+    [orderId]
+  )
+
+  const sendTyping = useCallback(() => {
+    const socket = socketRef.current
+    if (!socket || !orderId) return
+    socket.emit('typing', { orderId })
+  }, [orderId])
 
   return {
     messages,
     loading,
     error,
+    chatAvailable,
     connected,
+    socketStatus,
+    queuedMessageCount,
+    typingUsers,
+    onlineUserIds,
+    orderActions,
+    sendMessage,
+    sendOrderAction,
+    sendTyping,
   }
 }
