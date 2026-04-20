@@ -10,9 +10,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Loader2 } from 'lucide-react'
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL
-if (!SOCKET_URL) {
-  throw new Error('Missing NEXT_PUBLIC_SOCKET_URL in .env.local. Add NEXT_PUBLIC_SOCKET_URL and restart.')
-}
 
 type OrderItem = {
   id: string
@@ -115,6 +112,13 @@ export default function AdminDashboardPage() {
     }
 
     setConnectionStatus('connecting')
+
+    if (!SOCKET_URL) {
+      setConnectionStatus('disconnected')
+      setError('Chat server URL is not configured. Please contact support.')
+      setLoading(false)
+      return
+    }
 
     const socket = io(SOCKET_URL, {
       auth: { token },
