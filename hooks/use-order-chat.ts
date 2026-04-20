@@ -2,9 +2,6 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { io, Socket } from 'socket.io-client'
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL
-if (!SOCKET_URL) {
-  throw new Error('Missing NEXT_PUBLIC_SOCKET_URL in .env.local. Add NEXT_PUBLIC_SOCKET_URL and restart the dev server.')
-}
 
 export interface ChatMessage {
   id: string
@@ -279,6 +276,13 @@ export function useOrderChat(orderId: string | null, token: string | null) {
 
   useEffect(() => {
     if (!orderId || !token || !chatAvailable) return
+
+    if (!SOCKET_URL) {
+      setSocketStatus('disconnected')
+      setError('Chat server URL is not configured. Please contact support.')
+      setLoading(false)
+      return
+    }
 
     setSocketStatus('connecting')
     const socket = io(SOCKET_URL, {
