@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Search, Shield, Ban, CheckCircle, Pencil, Clock, AlertTriangle } from 'lucide-react';
+import { Search, Shield, Ban, CheckCircle, Pencil, Clock, AlertTriangle, Tags, Loader2 } from 'lucide-react';
 
 type UserItem = {
   id: string;
@@ -41,6 +41,18 @@ type UserEditForm = {
   is_verified: boolean;
 };
 
+type GameOption = {
+  id: string;
+  name: string;
+};
+
+type SellerCategoryOption = {
+  id: string;
+  name: string;
+  game_id: string;
+  assigned: boolean;
+};
+
 export default function UsersPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
@@ -54,6 +66,14 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
+  const [managingCategoriesFor, setManagingCategoriesFor] = useState<UserItem | null>(null);
+  const [games, setGames] = useState<GameOption[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<SellerCategoryOption[]>([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [selectedGameId, setSelectedGameId] = useState<string>('all');
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoriesSaving, setCategoriesSaving] = useState(false);
+  const [categoriesError, setCategoriesError] = useState('');
 
   const isAdmin = user?.role === 'admin';
 
@@ -216,6 +236,111 @@ export default function UsersPage() {
         return <Clock className="h-4 w-4" />;
       default:
         return <Shield className="h-4 w-4" />;
+    }
+  };
+
+  const openCategoriesDialog = async (userItem: UserItem) => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      setCategoriesError('Authentication required');
+      return;
+    }
+
+    setManagingCategoriesFor(userItem);
+    setCategoriesLoading(true);
+    setCategoriesSaving(false);
+    setCategoriesError('');
+    setSelectedCategoryIds([]);
+    setSelectedGameId('all');
+
+    try {
+      const [gamesRes, categoriesRes] = await Promise.all([
+        fetch('/api/games'),
+        fetch(`/api/admin/sellers/categories?user_id=${userItem.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+
+      const gamesData = await gamesRes.json();
+      const categoriesData = await categoriesRes.json();
+
+      if (!gamesRes.ok) {
+        throw new Error(gamesData.error || 'Unable to load games');
+      }
+
+      if (!categoriesRes.ok) {
+        throw new Error(categoriesData.error || 'Unable to load categories');
+      }
+
+      const gameItems: GameOption[] = (gamesData.games ?? []).map((game: any) => ({
+        id: String(game.id),
+        name: String(game.name),
+      }));
+
+      const categoryItems: SellerCategoryOption[] = (categoriesData.categories ?? []).map((item: any) => ({
+        id: String(item.id),
+        name: String(item.name),
+        game_id: String(item.game_id),
+        assigned: Boolean(item.assigned),
+      }));
+
+      setGames(gameItems);
+      setCategoryOptions(categoryItems);
+      setSelectedCategoryIds(categoryItems.filter((item) => item.assigned).map((item) => item.id));
+    } catch (err) {
+      setCategoriesError(err instanceof Error ? err.message : 'Failed to load seller categories');
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
+  const toggleCategory = (categoryId: string) => {
+    setSelectedCategoryIds((current) =>
+      current.includes(categoryId)
+        ? current.filter((id) => id !== categoryId)
+        : [...current, categoryId]
+    );
+  };
+
+  const saveSellerCategories = async () => {
+    if (!managingCategoriesFor) return;
+
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      setCategoriesError('Authentication required');
+      return;
+    }
+
+    setCategoriesSaving(true);
+    setCategoriesError('');
+
+    try {
+      const response = await fetch('/api/admin/sellers/categories', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          user_id: managingCategoriesFor.id,
+          category_ids: selectedCategoryIds,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update seller categories');
+      }
+
+      setManagingCategoriesFor(null);
+      setCategoryOptions([]);
+      setSelectedCategoryIds([]);
+      setSelectedGameId('all');
+      setCategoriesError('');
+    } catch (err) {
+      setCategoriesError(err instanceof Error ? err.message : 'Failed to update categories');
+    } finally {
+      setCategoriesSaving(false);
     }
   };
 
@@ -502,6 +627,17 @@ export default function UsersPage() {
                           </Button>
                         </div>
                         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+                          {userItem.role === 'seller' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full sm:w-auto"
+                              onClick={() => openCategoriesDialog(userItem)}
+                            >
+                              <Tags className="mr-2 h-4 w-4" />
+                              Manage Categories
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
@@ -523,6 +659,111 @@ export default function UsersPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={Boolean(managingCategoriesFor)}
+        onOpenChange={(open) => {
+          if (!open && !categoriesSaving) {
+            setManagingCategoriesFor(null);
+            setCategoryOptions([]);
+            setSelectedCategoryIds([]);
+            setSelectedGameId('all');
+            setCategoriesError('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-[calc(100%-1.5rem)] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tags className="h-5 w-5" />
+              Manage Seller Categories - {managingCategoriesFor?.username}
+            </DialogTitle>
+            <DialogDescription>
+              Assign allowed categories for this seller. Only assigned categories can be used when creating products.
+            </DialogDescription>
+          </DialogHeader>
+
+          {categoriesLoading ? (
+            <div className="flex items-center justify-center py-10 text-slate-500">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Loading categories...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-900">Game Filter</p>
+                <Select value={selectedGameId} onValueChange={setSelectedGameId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Filter by game" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Games</SelectItem>
+                    {games.map((game) => (
+                      <SelectItem key={game.id} value={game.id}>
+                        {game.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                {categoryOptions.filter((category) => selectedGameId === 'all' || category.game_id === selectedGameId).length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-500">No categories found for this filter.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {categoryOptions
+                      .filter((category) => selectedGameId === 'all' || category.game_id === selectedGameId)
+                      .map((category) => {
+                        const checked = selectedCategoryIds.includes(category.id);
+                        return (
+                          <label
+                            key={category.id}
+                            className="flex cursor-pointer items-center gap-3 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCategory(category.id)}
+                              className="h-4 w-4 rounded border-slate-300"
+                            />
+                            <span className="text-sm font-medium text-slate-800">{category.name}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {categoriesError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {categoriesError}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setManagingCategoriesFor(null);
+                setCategoryOptions([]);
+                setSelectedCategoryIds([]);
+                setSelectedGameId('all');
+                setCategoriesError('');
+              }}
+              disabled={categoriesSaving}
+              className="w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button onClick={saveSellerCategories} disabled={categoriesSaving || categoriesLoading} className="w-full sm:w-auto">
+              {categoriesSaving ? 'Saving...' : 'Save Categories'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(editingUser && editForm)} onOpenChange={(open) => !open && closeEditDialog()}>
         <DialogContent className="max-w-[calc(100%-1.5rem)] sm:max-w-lg">
