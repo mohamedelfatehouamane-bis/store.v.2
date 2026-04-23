@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Search, Shield, Ban, CheckCircle, Pencil, Clock, Gamepad2, Loader2, AlertTriangle } from 'lucide-react';
+import { Search, Shield, Ban, CheckCircle, Pencil, Clock, AlertTriangle } from 'lucide-react';
 
 type UserItem = {
   id: string;
@@ -30,14 +30,6 @@ type UserItem = {
   completed_orders?: number | null;
   dispute_count?: number | null;
   created_at: string;
-};
-
-type GameOption = {
-  id: string;
-  name: string;
-  slug: string;
-  platform: string;
-  assigned: boolean;
 };
 
 type UserEditForm = {
@@ -62,25 +54,6 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
-  const [managingGamesFor, setManagingGamesFor] = useState<UserItem | null>(null);
-  const [gameOptions, setGameOptions] = useState<GameOption[]>([]);
-  const [gamesLoading, setGamesLoading] = useState(false);
-  const [gamesError, setGamesError] = useState('');
-  const [togglingGameId, setTogglingGameId] = useState<string | null>(null);
-
-  const getUserGames = (userItem: UserItem): string[] => {
-    const selected = userItem.selected_games;
-    if (Array.isArray(selected)) {
-      return selected;
-    }
-
-    const assigned = userItem.assigned_games;
-    if (Array.isArray(assigned)) {
-      return assigned;
-    }
-
-    return [];
-  };
 
   const isAdmin = user?.role === 'admin';
 
@@ -203,90 +176,6 @@ export default function UsersPage() {
       setActionError(err instanceof Error ? err.message : 'Failed to update seller status');
     } finally {
       setActionLoading(null);
-    }
-  };
-
-  const openGamesDialog = async (userItem: UserItem) => {
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    setGamesError('');
-    setGameOptions([]);
-    setManagingGamesFor(userItem);
-    setGamesLoading(true);
-
-    try {
-      const response = await fetch(`/api/admin/sellers/games?user_id=${userItem.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unable to load games');
-      setGameOptions(data.games ?? []);
-    } catch (err) {
-      setGamesError(err instanceof Error ? err.message : 'Failed to load games');
-    } finally {
-      setGamesLoading(false);
-    }
-  };
-
-  const toggleGame = async (game: GameOption) => {
-    if (!managingGamesFor || togglingGameId) return;
-
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    setTogglingGameId(game.id);
-    setGamesError('');
-
-    try {
-      const method = game.assigned ? 'DELETE' : 'POST';
-      const url = game.assigned
-        ? `/api/admin/sellers/games?user_id=${managingGamesFor.id}&game_id=${game.id}`
-        : '/api/admin/sellers/games';
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        ...(method === 'POST'
-          ? { body: JSON.stringify({ user_id: managingGamesFor.id, game_id: game.id }) }
-          : {}),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to update game assignment');
-
-      // Toggle locally
-      setGameOptions((current) =>
-        current.map((g) => (g.id === game.id ? { ...g, assigned: !g.assigned } : g))
-      );
-
-      // Reflect in user list
-      setUsers((current) =>
-        current.map((u) => {
-          if (u.id !== managingGamesFor.id) return u;
-          const currentGames = getUserGames(u);
-          const updatedGames = game.assigned
-            ? currentGames.filter((name) => name !== game.name)
-            : [...currentGames, game.name];
-          return { ...u, assigned_games: updatedGames, selected_games: updatedGames };
-        })
-      );
-
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[users-page] toggled seller game', {
-          userId: managingGamesFor.id,
-          gameId: game.id,
-          gameName: game.name,
-          action: game.assigned ? 'unassign' : 'assign',
-        });
-      }
-    } catch (err) {
-      setGamesError(err instanceof Error ? err.message : 'Failed to update game');
-    } finally {
-      setTogglingGameId(null);
     }
   };
 
@@ -522,7 +411,7 @@ export default function UsersPage() {
                   dispute_count: userItem.dispute_count,
                 });
                 return (
-                  <div key={userItem.id} className="rounded-lg border border-slate-200 p-4 transition-colors hover:bg-slate-50">
+                  <div key={userItem.id} className="rounded-lg border border-slate-200 p-3 sm:p-4 transition-colors hover:bg-slate-50">
                     <div className="mb-4 flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-purple-500 text-sm font-bold text-white">
                         {userItem.username.charAt(0).toUpperCase()}
@@ -539,7 +428,7 @@ export default function UsersPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                       <div className="rounded-lg border border-slate-200 px-3 py-2">
                         <p className="mb-1 text-xs font-semibold uppercase text-slate-500">{t('role')}</p>
                         <p className="font-medium capitalize text-slate-900">{userItem.role}</p>
@@ -577,26 +466,18 @@ export default function UsersPage() {
                         <p className="font-medium text-slate-900">{new Date(userItem.created_at).toLocaleDateString()}</p>
                       </div>
 
-                      <div className="rounded-lg border border-slate-200 px-3 py-2">
-                        <p className="mb-1 text-xs font-semibold uppercase text-slate-500">{t('games')}</p>
-                        <p className="font-medium text-slate-900">
-                          {getUserGames(userItem).length > 0
-                            ? getUserGames(userItem).join(', ')
-                            : t('none')}
-                        </p>
-                      </div>
-
                       {userItem.verification_status === 'rejected' && userItem.rejection_reason && (
                         <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
                           <span className="font-semibold">{t('rejected')}:</span> {userItem.rejection_reason}
                         </div>
                       )}
 
-                      <div className="flex flex-col gap-2 items-end">
-                        <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-col gap-2 sm:col-span-2 xl:col-span-4">
+                        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
                           <Button
                             size="sm"
                             variant="outline"
+                            className="w-full sm:w-auto"
                             disabled={
                               userItem.role !== 'seller' ||
                               getStatus(userItem) === 'approved' ||
@@ -609,6 +490,7 @@ export default function UsersPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className="w-full sm:w-auto"
                             disabled={
                               userItem.role !== 'seller' ||
                               getStatus(userItem) === 'rejected' ||
@@ -619,20 +501,11 @@ export default function UsersPage() {
                             {t('reject')}
                           </Button>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {userItem.role === 'seller' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openGamesDialog(userItem)}
-                            >
-                              <Gamepad2 className="mr-2 h-4 w-4" />
-                              {t('manageGamesForUser')}
-                            </Button>
-                          )}
+                        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
                           <Button
                             variant="outline"
                             size="sm"
+                            className="w-full sm:w-auto"
                             onClick={() => openEditDialog(userItem)}
                           >
                             <Pencil className="mr-2 h-4 w-4" />
@@ -650,67 +523,6 @@ export default function UsersPage() {
           )}
         </CardContent>
       </Card>
-
-      <Dialog open={Boolean(managingGamesFor)} onOpenChange={(open) => { if (!open && !togglingGameId) { setManagingGamesFor(null); setGameOptions([]); setGamesError(''); } }}>
-        <DialogContent className="max-w-[calc(100%-1.5rem)] sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Gamepad2 className="h-5 w-5" />
-              {t('manageGamesForUser')} — {managingGamesFor?.username}
-            </DialogTitle>
-            <DialogDescription>{t('toggleSellerGamesDescription')}</DialogDescription>
-          </DialogHeader>
-
-          {gamesLoading ? (
-            <div className="flex items-center justify-center py-10 text-slate-500">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              {t('loadingGames')}
-            </div>
-          ) : gameOptions.length === 0 && !gamesError ? (
-            <p className="py-8 text-center text-sm text-slate-500">{t('noActiveGamesFound')}</p>
-          ) : (
-            <div className="flex flex-wrap gap-2 py-2">
-              {gameOptions.map((game) => (
-                <button
-                  key={game.id}
-                  type="button"
-                  disabled={togglingGameId === game.id}
-                  onClick={() => toggleGame(game)}
-                  className={[
-                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50',
-                    game.assigned
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                      : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
-                  ].join(' ')}
-                >
-                  {togglingGameId === game.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <span className={`h-2 w-2 rounded-full ${game.assigned ? 'bg-blue-500' : 'bg-slate-300'}`} />
-                  )}
-                  {game.name}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {gamesError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {gamesError}
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => { setManagingGamesFor(null); setGameOptions([]); setGamesError(''); }}
-              disabled={Boolean(togglingGameId)}
-            >
-              {t('done')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={Boolean(editingUser && editForm)} onOpenChange={(open) => !open && closeEditDialog()}>
         <DialogContent className="max-w-[calc(100%-1.5rem)] sm:max-w-lg">
