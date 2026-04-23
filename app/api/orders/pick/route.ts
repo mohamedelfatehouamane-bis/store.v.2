@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
 
     const { data: order, error: orderError } = await db
       .from('orders')
-      .select('id, status, assigned_seller_id, points_amount, customer_id')
+      .select('id, status, assigned_seller_id, points_amount, customer_id, offer_id')
       .eq('id', order_id)
       .maybeSingle();
 
@@ -56,6 +56,52 @@ export async function POST(request: NextRequest) {
     if (seller.verification_status !== 'verified' && seller.verification_status !== 'approved') {
       return NextResponse.json(
         { error: 'Only verified sellers can pick orders' },
+        { status: 403 }
+      );
+    }
+
+    if (!order.offer_id) {
+      return NextResponse.json(
+        { error: 'This order cannot be picked by sellers' },
+        { status: 403 }
+      );
+    }
+
+    const { data: offer, error: offerError } = await db
+      .from('offers')
+      .select('id, product_id')
+      .eq('id', order.offer_id)
+      .maybeSingle();
+
+    if (offerError || !offer?.product_id) {
+      return NextResponse.json({ error: 'Order offer is invalid' }, { status: 400 });
+    }
+
+    const { data: product, error: productError } = await db
+      .from('products')
+      .select('id, game_id, category_id')
+      .eq('id', offer.product_id)
+      .maybeSingle();
+
+    if (productError || !product?.category_id || !product?.game_id) {
+      return NextResponse.json({ error: 'Order category is invalid' }, { status: 400 });
+    }
+
+    const { data: sellerCategory, error: sellerCategoryError } = await db
+      .from('seller_categories')
+      .select('id')
+      .eq('seller_id', auth.id)
+      .eq('game_id', product.game_id)
+      .eq('category_id', product.category_id)
+      .maybeSingle();
+
+    if (sellerCategoryError) {
+      return NextResponse.json({ error: sellerCategoryError.message }, { status: 500 });
+    }
+
+    if (!sellerCategory) {
+      return NextResponse.json(
+        { error: 'You are not assigned to this order category' },
         { status: 403 }
       );
     }
