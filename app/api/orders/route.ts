@@ -125,7 +125,7 @@ export async function GET(request: NextRequest) {
         if (productIds.length > 0) {
           const { data: productsData } = await adminDb
             .from('products')
-            .select('id, name, game_id');
+            .select('id, name, game_id, category_id');
           
           if (productsData) {
             // Fetch game details
@@ -146,16 +146,41 @@ export async function GET(request: NextRequest) {
             }
             
             (productsData as any[]).forEach((p: any) => {
-              productsMap[p.id] = { name: p.name, game_name: gamesMap[p.game_id] ?? '' };
+              productsMap[p.id] = {
+                name: p.name,
+                game_name: gamesMap[p.game_id] ?? '',
+                category_id: p.category_id ?? null,
+              };
             });
           }
         }
         
         (offersData as any[]).forEach((o: any) => {
-          const product = productsMap[o.product_id] ?? { name: '', game_name: '' };
+          const product = productsMap[o.product_id] ?? { name: '', game_name: '', category_id: null };
           offersMap[o.id] = { points_price: o.points_price, ...product };
         });
       }
+    }
+
+    if (filter === 'available' && auth.role === 'seller') {
+      const { data: sellerAssignments, error: assignmentsError } = await adminDb
+        .from('seller_categories')
+        .select('category_id')
+        .eq('seller_id', auth.id);
+
+      if (assignmentsError) {
+        return NextResponse.json({ error: assignmentsError.message }, { status: 500 });
+      }
+
+      const allowedCategoryIds = new Set(
+        (sellerAssignments ?? []).map((row: any) => String(row.category_id)).filter(Boolean)
+      );
+
+      orders = orders.filter((order: any) => {
+        const categoryId = offersMap[order.offer_id]?.category_id;
+        if (!categoryId) return false;
+        return allowedCategoryIds.has(String(categoryId));
+      });
     }
 
     const normalizedOrders = orders.map((order) => {
