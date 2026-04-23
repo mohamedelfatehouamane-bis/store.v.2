@@ -17,6 +17,7 @@ type Game = {
 type Category = {
   id: string
   name: string
+  game_id?: string
 }
 
 type Product = {
@@ -60,13 +61,35 @@ export default function SellerProductsPage() {
     return token ? { Authorization: `Bearer ${token}` } : {}
   }
 
-  async function loadGames() {
+  async function loadAllowedGames() {
     try {
-      const res = await fetch('/api/games')
-      const data = await res.json()
-      setGames(data.games ?? [])
-    } catch {
-      toast.error('Unable to load games')
+      const [sellerCategoriesRes, gamesRes] = await Promise.all([
+        fetch('/api/sellers/categories', { headers: authHeaders() }),
+        fetch('/api/games'),
+      ])
+
+      const sellerCategoriesData = await sellerCategoriesRes.json()
+      const gamesData = await gamesRes.json()
+
+      if (!sellerCategoriesRes.ok) {
+        throw new Error(sellerCategoriesData.error || 'Unable to load seller categories')
+      }
+
+      if (!gamesRes.ok) {
+        throw new Error(gamesData.error || 'Unable to load games')
+      }
+
+      const allowedGameIds = new Set(
+        (sellerCategoriesData.categories ?? []).map((category: any) => String(category.game_id))
+      )
+
+      const allowedGames = (gamesData.games ?? []).filter((game: any) =>
+        allowedGameIds.has(String(game.id))
+      )
+
+      setGames(allowedGames)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to load allowed games')
     }
   }
 
@@ -78,11 +101,18 @@ export default function SellerProductsPage() {
     }
 
     try {
-      const res = await fetch(`/api/games/${gameId}/categories`)
+      const res = await fetch(`/api/sellers/categories?game_id=${gameId}`, {
+        headers: authHeaders(),
+      })
       const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to load categories')
+      }
+
       setCategories(data.categories ?? [])
-    } catch {
-      toast.error('Unable to load categories')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to load categories')
     }
   }
 
@@ -105,7 +135,7 @@ export default function SellerProductsPage() {
 
   useEffect(() => {
     if (!isSeller) return
-    loadGames()
+    loadAllowedGames()
     loadProducts()
   }, [isSeller])
 
@@ -236,8 +266,9 @@ export default function SellerProductsPage() {
                 onChange={(e) => setForm((state) => ({ ...state, game_id: e.target.value }))}
                 className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 required
+                disabled={games.length === 0}
               >
-                <option value="">Select a game...</option>
+                <option value="">{games.length === 0 ? 'No allowed games' : 'Select a game...'}</option>
                 {games.map((game) => (
                   <option key={game.id} value={game.id}>
                     {game.name}
@@ -255,7 +286,7 @@ export default function SellerProductsPage() {
                 required
                 disabled={!form.game_id || categories.length === 0}
               >
-                <option value="">Select a category...</option>
+                <option value="">{form.game_id && categories.length === 0 ? 'No allowed categories' : 'Select a category...'}</option>
                 {categories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
