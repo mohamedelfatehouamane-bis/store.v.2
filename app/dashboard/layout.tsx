@@ -2,10 +2,9 @@
 
 import { useAuth } from '@/lib/auth-context';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Sidebar, { DashboardNavContent } from '@/components/dashboard/sidebar';
 import TopNavbar from '@/components/dashboard/top-navbar';
-import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { supabase } from '@/lib/db';
 
 export default function DashboardLayout({
@@ -18,6 +17,16 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const refreshTimeoutRef = useRef<number | null>(null);
+
+  const closeSidebar = useCallback(() => setIsSidebarOpen(false), []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeSidebar();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [closeSidebar]);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -102,14 +111,26 @@ export default function DashboardLayout({
           {children}
         </main>
       </div>
-      <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
-        <SheetContent
-          side="left"
-          className="w-[85vw] max-w-72 border-r border-gray-200 bg-white p-0 text-black dark:border-gray-800 dark:bg-gray-900 dark:text-white lg:hidden"
-        >
-          <DashboardNavContent onNavigate={() => setIsSidebarOpen(false)} />
-        </SheetContent>
-      </Sheet>
+
+      {/* Mobile sidebar backdrop */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 lg:hidden ${
+          isSidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        onClick={closeSidebar}
+        aria-hidden="true"
+      />
+
+      {/* Mobile sidebar panel */}
+      <aside
+        className={`fixed left-0 top-0 z-50 flex h-screen w-[250px] shrink-0 overflow-y-auto scroll-smooth flex-col border-r border-gray-200 bg-white text-black transition-transform duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 dark:text-white lg:hidden ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        aria-label="Mobile dashboard navigation"
+        aria-hidden={!isSidebarOpen}
+      >
+        <DashboardNavContent onNavigate={closeSidebar} />
+      </aside>
     </div>
   );
 }
