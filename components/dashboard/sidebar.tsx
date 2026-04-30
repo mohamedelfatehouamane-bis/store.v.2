@@ -75,8 +75,8 @@ function DashboardNavContent({ onNavigate }: SidebarContentProps) {
   const links = user?.role === 'admin' ? adminLinks : user?.role === 'seller' ? sellerLinks : customerLinks;
 
   return (
-    <>
-      <div className="border-b border-gray-200 p-4 dark:border-gray-800 sm:p-6">
+    <div className="flex h-full flex-col">
+      <div className="shrink-0 border-b border-gray-200 p-4 dark:border-gray-800 sm:p-6">
         <Link href="/dashboard" className="flex items-center gap-2" onClick={onNavigate}>
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-800">
             <span className="text-sm font-bold text-black dark:text-white">M</span>
@@ -85,7 +85,10 @@ function DashboardNavContent({ onNavigate }: SidebarContentProps) {
         </Link>
       </div>
 
-      <nav className="flex-1 space-y-2 p-3 sm:p-4">
+      <nav
+        className="flex-1 overflow-y-auto scroll-smooth space-y-1 p-3 sm:p-4"
+        aria-label="Dashboard navigation links"
+      >
         {links.map((link) => {
           const Icon = link.icon;
           return (
@@ -105,7 +108,7 @@ function DashboardNavContent({ onNavigate }: SidebarContentProps) {
         })}
       </nav>
 
-      <div className="space-y-3 border-t border-gray-200 p-3 dark:border-gray-800 sm:p-4">
+      <div className="shrink-0 space-y-3 border-t border-gray-200 p-3 dark:border-gray-800 sm:p-4">
         <div className="rounded-lg bg-gray-100 px-4 py-3 dark:bg-[#020617]">
           <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('loggedInAs')}</p>
           <p className="font-medium text-black dark:text-white">{user?.username}</p>
@@ -129,13 +132,16 @@ function DashboardNavContent({ onNavigate }: SidebarContentProps) {
           {t('logout')}
         </Button>
       </div>
-    </>
+    </div>
   );
 }
 
 export default function Sidebar() {
   return (
-    <aside className="hidden w-64 border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 lg:flex lg:flex-col">
+    <aside
+      className="sticky top-0 hidden h-screen w-[280px] shrink-0 overflow-y-auto scroll-smooth border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 lg:flex lg:flex-col"
+      aria-label="Dashboard sidebar"
+    >
       <DashboardNavContent />
     </aside>
   );
