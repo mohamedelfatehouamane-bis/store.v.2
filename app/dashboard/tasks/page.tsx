@@ -14,6 +14,7 @@ type OrderItem = {
   game_name: string;
   status: string;
   points_price: number;
+  seller_earnings: number;
   created_at: string;
 };
 
@@ -239,6 +240,7 @@ export default function TasksPage() {
                                     {order.status.replace('_', ' ')}
                                   </span>
                                   <span className="font-bold text-blue-600">{order.points_price} pts</span>
+                                  <span className="font-semibold text-green-600">You will earn: {order.seller_earnings} pts</span>
                                 </div>
                               </div>
                               <Button
@@ -289,25 +291,26 @@ export default function TasksPage() {
               ) : (
                 <div className="space-y-3">
                   {myOrders.map((order) => (
-                    <Card key={order.id} className="p-3 bg-slate-50">
-                      <p className="font-semibold text-sm text-slate-900 mb-1">{order.product_name}</p>
-                      <p className="text-xs text-slate-600 mb-2">{order.game_name}</p>
-                      <div className="space-y-1 text-xs mb-2">
-                        <p>
-                          <span className="text-slate-600">Status:</span>
-                          <span className="ml-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded inline-block font-medium">
-                            {order.status.replace('_', ' ')}
-                          </span>
-                        </p>
-                        <p className="text-slate-600">Picked {new Date(order.created_at).toLocaleDateString()}</p>
-                        <p className="font-bold text-green-600">Value: {order.points_price} pts</p>
-                      </div>
-                      <Link href={`/dashboard/orders/${order.id}`}>
-                        <Button size="sm" variant="outline" className="w-full text-xs">
-                          View Details
-                        </Button>
-                      </Link>
-                    </Card>
+                      <Card key={order.id} className="p-3 bg-slate-50">
+                        <p className="font-semibold text-sm text-slate-900 mb-1">{order.product_name}</p>
+                        <p className="text-xs text-slate-600 mb-2">{order.game_name}</p>
+                        <div className="space-y-1 text-xs mb-2">
+                          <p>
+                            <span className="text-slate-600">Status:</span>
+                            <span className={`ml-1 px-2 py-0.5 rounded inline-block font-medium ${getStatusColor(order.status)}`}>
+                              {order.status.replace('_', ' ')}
+                            </span>
+                          </p>
+                          <p className="text-slate-600">Picked {new Date(order.created_at).toLocaleDateString()}</p>
+                          <p className="font-bold text-blue-600">Order value: {order.points_price} pts</p>
+                          <p className="font-bold text-green-600">Earning: {order.seller_earnings} pts</p>
+                        </div>
+                        <Link href={`/dashboard/orders/${order.id}`}>
+                          <Button size="sm" variant="outline" className="w-full text-xs">
+                            View Details
+                          </Button>
+                        </Link>
+                      </Card>
                   ))}
                 </div>
               )}
