@@ -125,7 +125,8 @@ export async function GET(request: NextRequest) {
         if (productIds.length > 0) {
           const { data: productsData } = await adminDb
             .from('products')
-            .select('id, name, game_id, category_id');
+            .select('id, name, game_id, category_id')
+            .in('id', productIds);
           
           if (productsData) {
             // Fetch game details
@@ -148,6 +149,7 @@ export async function GET(request: NextRequest) {
             (productsData as any[]).forEach((p: any) => {
               productsMap[p.id] = {
                 name: p.name,
+                game_id: p.game_id ?? null,
                 game_name: gamesMap[p.game_id] ?? '',
                 category_id: p.category_id ?? null,
               };
@@ -165,21 +167,24 @@ export async function GET(request: NextRequest) {
     if (filter === 'available' && auth.role === 'seller') {
       const { data: sellerAssignments, error: assignmentsError } = await adminDb
         .from('seller_categories')
-        .select('category_id')
+        .select('game_id, category_id')
         .eq('seller_id', auth.id);
 
       if (assignmentsError) {
         return NextResponse.json({ error: assignmentsError.message }, { status: 500 });
       }
 
-      const allowedCategoryIds = new Set(
-        (sellerAssignments ?? []).map((row: any) => String(row.category_id)).filter(Boolean)
+      // Build a set of "game_id:category_id" pairs the seller is authorized for.
+      const allowedPairs = new Set(
+        (sellerAssignments ?? [])
+          .filter((row: any) => row.game_id && row.category_id)
+          .map((row: any) => `${row.game_id}:${row.category_id}`)
       );
 
       orders = orders.filter((order: any) => {
-        const categoryId = offersMap[order.offer_id]?.category_id;
-        if (!categoryId) return false;
-        return allowedCategoryIds.has(String(categoryId));
+        const offerEntry = offersMap[order.offer_id];
+        if (!offerEntry?.game_id || !offerEntry?.category_id) return false;
+        return allowedPairs.has(`${offerEntry.game_id}:${offerEntry.category_id}`);
       });
     }
 
