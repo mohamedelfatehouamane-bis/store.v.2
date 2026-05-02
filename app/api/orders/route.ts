@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     const baseQuery = adminDb
       .from('orders')
       .select(
-        `id, customer_id, assigned_seller_id, status, points_amount, seller_earnings, created_at, offer_id`
+        `id, customer_id, assigned_seller_id, status, points_amount, seller_earnings, created_at, offer_id, product_id`
       )
       .order('created_at', { ascending: false });
 
