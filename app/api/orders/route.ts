@@ -82,10 +82,42 @@ export async function GET(request: NextRequest) {
 
     let queryBuilder = baseQuery;
 
+    // Resolve the current public.users.id by email so queries work even when
+    // the JWT carries a stale auth.uid() that differs from public.users.id
+    // (e.g. legacy users created before the auth-id sync migration).
+    let resolvedUserId = auth.id;
+    if (filter === 'my-orders' || filter === 'my-tasks') {
+      const { data: dbUser } = await adminDb
+        .from('users')
+        .select('id')
+        .eq('email', auth.email)
+        .maybeSingle();
+      if (dbUser?.id) {
+        resolvedUserId = dbUser.id;
+      }
+    }
+    // Also include the Supabase Auth UID in case old data was stored with
+    // customer_id = auth.uid() (before public.users.id was synced to auth.uid).
+    const candidateSet = new Set([auth.id, resolvedUserId].filter(Boolean));
+    if ((filter === 'my-orders' || filter === 'my-tasks') && supabaseAdmin && auth.email) {
+      try {
+        const { data: authUserLookup } = await supabaseAdmin.auth.admin.getUserByEmail(auth.email);
+        if (authUserLookup?.user?.id) candidateSet.add(authUserLookup.user.id);
+      } catch {
+        // Non-critical – continue with the IDs we already have.
+      }
+    }
+    // Include all known identity candidates so we catch orders created under any ID.
+    const userIdCandidates = Array.from(candidateSet);
+
     if (filter === 'my-orders') {
-      queryBuilder = queryBuilder.eq('customer_id', auth.id);
+      queryBuilder = userIdCandidates.length > 1
+        ? queryBuilder.in('customer_id', userIdCandidates)
+        : queryBuilder.eq('customer_id', resolvedUserId);
     } else if (filter === 'my-tasks') {
-      queryBuilder = queryBuilder.eq('assigned_seller_id', auth.id);
+      queryBuilder = userIdCandidates.length > 1
+        ? queryBuilder.in('assigned_seller_id', userIdCandidates)
+        : queryBuilder.eq('assigned_seller_id', resolvedUserId);
     } else if (filter === 'available') {
       // Only show open orders that haven't been assigned to a seller yet.
       queryBuilder = queryBuilder.eq('status', 'open').is('assigned_seller_id', null);
@@ -165,10 +197,23 @@ export async function GET(request: NextRequest) {
     }
 
     if (filter === 'available' && auth.role === 'seller') {
+      // Resolve the DB user id by email so seller_categories lookup works even
+      // when the JWT carries a stale id from before the auth-id sync migration.
+      let sellerDbId = auth.id;
+      {
+        const { data: sellerDbUser } = await adminDb
+          .from('users')
+          .select('id')
+          .eq('email', auth.email)
+          .maybeSingle();
+        if (sellerDbUser?.id) sellerDbId = sellerDbUser.id;
+      }
+      const sellerCandidates = Array.from(new Set([auth.id, sellerDbId].filter(Boolean)));
+
       const { data: sellerAssignments, error: assignmentsError } = await adminDb
         .from('seller_categories')
         .select('game_id, category_id')
-        .eq('seller_id', auth.id);
+        .in('seller_id', sellerCandidates);
 
       if (assignmentsError) {
         return NextResponse.json({ error: assignmentsError.message }, { status: 500 });

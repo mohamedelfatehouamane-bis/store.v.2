@@ -81,26 +81,47 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url)
     const status = url.searchParams.get('status')
 
-    const withAllOptionalFields = await supabase
-      .from('point_topups')
-      .select('id, user_id, amount_points, proof_image, status, created_at, payment_method, payment_account_name, payment_account_number, transaction_reference, rejection_reason')
-      .eq('user_id', auth.id)
-      .order('created_at', { ascending: false })
+    // Resolve the DB user id by email to handle legacy users where the JWT
+    // may carry a stale auth.uid() that differs from public.users.id.
+    let resolvedUserId = auth.id
+    const candidateSet = new Set([auth.id].filter(Boolean))
+    if (auth.email) {
+      const { data: dbUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', auth.email)
+        .maybeSingle()
+      if (dbUser?.id) {
+        resolvedUserId = dbUser.id
+        candidateSet.add(dbUser.id)
+      }
+      // Also include the Supabase Auth UID in case topups were stored with auth.uid().
+      if (supabaseAdmin) {
+        try {
+          const { data: authUserLookup } = await supabaseAdmin.auth.admin.getUserByEmail(auth.email)
+          if (authUserLookup?.user?.id) candidateSet.add(authUserLookup.user.id)
+        } catch {
+          // Non-critical – continue with the IDs we already have.
+        }
+      }
+    }
+    const userIdCandidates = Array.from(candidateSet)
+
+    const queryWith = (select: string) =>
+      userIdCandidates.length > 1
+        ? supabase.from('point_topups').select(select).in('user_id', userIdCandidates).order('created_at', { ascending: false })
+        : supabase.from('point_topups').select(select).eq('user_id', resolvedUserId).order('created_at', { ascending: false })
+
+    const withAllOptionalFields = await queryWith(
+      'id, user_id, amount_points, proof_image, status, created_at, payment_method, payment_account_name, payment_account_number, transaction_reference, rejection_reason'
+    )
 
     const withMethodFields = withAllOptionalFields.error?.code === '42703'
-      ? await supabase
-          .from('point_topups')
-          .select('id, user_id, amount_points, proof_image, status, created_at, payment_method')
-          .eq('user_id', auth.id)
-          .order('created_at', { ascending: false })
+      ? await queryWith('id, user_id, amount_points, proof_image, status, created_at, payment_method')
       : withAllOptionalFields
 
     const fallback = withMethodFields.error?.code === '42703'
-      ? await supabase
-          .from('point_topups')
-          .select('id, user_id, amount_points, proof_image, status, created_at')
-          .eq('user_id', auth.id)
-          .order('created_at', { ascending: false })
+      ? await queryWith('id, user_id, amount_points, proof_image, status, created_at')
       : withMethodFields
 
     const { data, error } = fallback
