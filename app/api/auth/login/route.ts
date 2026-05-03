@@ -22,6 +22,7 @@ async function syncPublicUser(
 ) {
   if (!supabaseAdmin) return null
 
+  // Primary lookup: row whose id already matches auth.uid().
   const { data: existing } = await supabaseAdmin
     .from('users')
     .select('id, email, username, role')
@@ -30,7 +31,19 @@ async function syncPublicUser(
 
   if (existing) return existing
 
-  // Row is missing – create it now so auth.uid() === public.users.id.
+  // Fallback: a legacy row may exist under the same email but with a
+  // different id (created before auth.uid() was synced).  Return it as-is
+  // rather than creating a duplicate; the JWT will carry the correct
+  // public.users.id regardless.
+  const { data: byEmail } = await supabaseAdmin
+    .from('users')
+    .select('id, email, username, role')
+    .eq('email', email)
+    .maybeSingle()
+
+  if (byEmail) return byEmail
+
+  // Row is missing entirely – create it now so auth.uid() === public.users.id.
   const password_hash = await hashPassword(password)
   const username =
     meta.username || email.split('@')[0] + '_' + Math.random().toString(36).slice(2, 6)
@@ -113,9 +126,8 @@ export async function POST(request: NextRequest) {
       user = legacyUser
 
       // Best-effort: create a Supabase Auth entry for this legacy user so
-      // future logins go through Supabase Auth.  We cannot change the existing
-      // public.users.id (FK constraints), so note that for truly legacy users
-      // auth.uid() will differ from public.users.id until they re-register.
+      // future logins go through Supabase Auth.  We pass id: user.id so that
+      // auth.uid() === public.users.id and all DB filters continue to work.
       if (supabaseAdmin) {
         const { data: existingAuthUser } = await supabaseAdmin.auth.admin
           .getUserById(user.id)
@@ -124,6 +136,7 @@ export async function POST(request: NextRequest) {
         if (!existingAuthUser?.user) {
           await supabaseAdmin.auth.admin
             .createUser({
+              id: user.id,
               email,
               password,
               email_confirm: true,
