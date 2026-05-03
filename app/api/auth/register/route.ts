@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Hash password
+    // Hash password (stored in public.users for custom-auth fallback)
     const password_hash = await hashPassword(password)
 
     // Check if email or username already exists
@@ -68,10 +68,40 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Insert the new user
+    // Create a Supabase Auth user so that auth.uid() == public.users.id.
+    // email_confirm: true skips the confirmation email and activates the user
+    // immediately; adjust to false if you want email verification.
+    const { data: authData, error: authCreateError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { username, role },
+      })
+
+    if (authCreateError) {
+      console.error('Supabase Auth user creation error:', authCreateError)
+      // Duplicate auth user means the email already exists in auth.users.
+      if (authCreateError.message?.toLowerCase().includes('already been registered')) {
+        return NextResponse.json(
+          { error: 'A user with this email already exists' },
+          { status: 400 }
+        )
+      }
+      return NextResponse.json(
+        { error: 'Failed to create auth user', message: authCreateError.message },
+        { status: 500 }
+      )
+    }
+
+    const authUid = authData.user.id
+
+    // Insert the public profile using auth.uid() as the primary key so that
+    // auth.uid() === public.users.id for this user forever.
     const { data: newUser, error: insertError } = await supabaseAdmin
       .from('users')
       .insert({
+        id: authUid,
         email,
         username,
         password_hash,
@@ -83,6 +113,8 @@ export async function POST(request: NextRequest) {
 
     if (insertError) {
       console.error('Register insert error:', insertError)
+      // Roll back the Supabase Auth user so the email is not left orphaned.
+      await supabaseAdmin.auth.admin.deleteUser(authUid)
       if (insertError.code === '23505') {
         return NextResponse.json(
           { error: 'A user with this email or username already exists' },

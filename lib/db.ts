@@ -24,6 +24,15 @@ export const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
     })
   : null
 
+/**
+ * Server-side Supabase client.
+ * Uses the service-role key (bypasses RLS) when available; falls back to the
+ * anon key.  Import this in every API route instead of `supabase` so that
+ * Row Level Security policies never silently block server-to-server queries.
+ */
+export const supabaseServer: ReturnType<typeof createClient> =
+  supabaseAdmin ?? supabase
+
 export async function query<T = any>(
   sql: string,
   params: any[] = []

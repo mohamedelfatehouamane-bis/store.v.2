@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/db'
+import { supabaseServer as supabase } from '@/lib/db'
 import { verifyToken } from '@/lib/auth'
 import { encryptGameAccountSecret } from '@/lib/game-account-secrets'
 import { z } from 'zod'
