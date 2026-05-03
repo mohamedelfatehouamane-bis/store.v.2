@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 
 function requireAdmin(request: NextRequest) {
@@ -24,6 +24,10 @@ export async function GET(request: NextRequest) {
     const { error: authError } = requireAdmin(request);
     if (authError) return authError;
 
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 });
+    }
+
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('user_id');
     const gameId = searchParams.get('game_id');
@@ -32,7 +36,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
     }
 
-    let categoriesQuery = supabase
+    let categoriesQuery = supabaseAdmin
       .from('categories')
       .select('id, name, game_id, is_active')
       .eq('is_active', true)
@@ -48,7 +52,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: allCategoriesError.message }, { status: 500 });
     }
 
-    let assignedQuery = supabase
+    let assignedQuery = supabaseAdmin
       .from('seller_categories')
       .select('category_id')
       .eq('seller_id', userId);
@@ -85,6 +89,10 @@ export async function POST(request: NextRequest) {
     const { error: authError } = requireAdmin(request);
     if (authError) return authError;
 
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 });
+    }
+
     const body = await request.json();
     const user_id = String(body?.user_id ?? '').trim();
     const category_ids = Array.isArray(body?.category_ids)
@@ -110,7 +118,7 @@ export async function POST(request: NextRequest) {
 
     let validCategories: any[] = [];
     if (uniqueCategoryIds.length > 0) {
-      const { data, error: validCategoriesError } = await supabase
+      const { data, error: validCategoriesError } = await supabaseAdmin
         .from('categories')
         .select('id, game_id')
         .in('id', uniqueCategoryIds);
@@ -135,7 +143,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { error: clearError } = await supabase
+    const { error: clearError } = await supabaseAdmin
       .from('seller_categories')
       .delete()
       .eq('seller_id', user_id);
@@ -158,7 +166,7 @@ export async function POST(request: NextRequest) {
       category_id: category.id,
     }));
 
-    const { error: insertError } = await supabase.from('seller_categories').insert(rows);
+    const { error: insertError } = await supabaseAdmin.from('seller_categories').insert(rows);
 
     if (insertError) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
