@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { supabase } from '@/lib/db'
+import { supabaseServer as supabase } from '@/lib/db'
 
 type PaymentMethodRow = {
   id: string

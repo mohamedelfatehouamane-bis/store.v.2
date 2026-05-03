@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, supabaseAdmin } from '@/lib/db'
+import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
 import { verifyToken } from '@/lib/auth'
 import { buildTrustSummary } from '@/lib/trust-score'
 

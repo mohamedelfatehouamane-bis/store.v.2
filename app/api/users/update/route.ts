@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/db'
+import { supabaseServer as supabase } from '@/lib/db'
 import { hashPassword, verifyPassword, verifyToken } from '@/lib/auth'
 import { z } from 'zod'
 
