@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer as supabase } from '@/lib/db';
+import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
@@ -29,7 +29,38 @@ export async function GET(request: NextRequest) {
       .eq('id', auth.id)
       .single();
 
-    if (error || !user) {
+    // If the JWT carries a stale auth.uid() that doesn't match any
+    // public.users row, fall back to resolving the user by email so
+    // the dashboard shows the correct data for legacy accounts.
+    let resolvedUser = user;
+    if ((error || !user) && auth.email) {
+      // Try resolving by email (covers the public.users.id lookup).
+      const { data: byEmail } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', auth.email)
+        .maybeSingle();
+      resolvedUser = byEmail ?? null;
+
+      // If still not found, try looking up via Supabase Auth UID as a last resort.
+      if (!resolvedUser && supabaseAdmin) {
+        try {
+          const { data: authUserLookup } = await supabaseAdmin.auth.admin.getUserByEmail(auth.email);
+          if (authUserLookup?.user?.id && authUserLookup.user.id !== auth.id) {
+            const { data: byAuthUid } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', authUserLookup.user.id)
+              .maybeSingle();
+            resolvedUser = byAuthUid ?? null;
+          }
+        } catch {
+          // Non-critical – fall through to 404.
+        }
+      }
+    }
+
+    if (!resolvedUser) {
       console.error('Profile query error:', error);
       return NextResponse.json(
         { error: 'User not found' },
@@ -45,11 +76,11 @@ export async function GET(request: NextRequest) {
     let average_rating = 0
     let total_reviews = 0
 
-    if (user.role === 'seller') {
+    if (resolvedUser.role === 'seller') {
       const { data: seller, error: sellerError } = await supabase
         .from('sellers')
         .select('id, verification_status, rejection_reason, business_description, average_rating, total_reviews')
-        .eq('user_id', auth.id)
+        .eq('user_id', resolvedUser.id)
         .single()
 
       if (!sellerError && seller) {
@@ -81,10 +112,10 @@ export async function GET(request: NextRequest) {
     }
 
     const normalizedUser = {
-      ...user,
-      total_points: Number(user.points ?? 0),
-      balance: Number(user.balance ?? user.points ?? 0),
-      is_verified: user.is_verified ?? false,
+      ...resolvedUser,
+      total_points: Number(resolvedUser.points ?? 0),
+      balance: Number(resolvedUser.balance ?? resolvedUser.points ?? 0),
+      is_verified: resolvedUser.is_verified ?? false,
       verification_status,
       rejection_reason,
       business_description,
