@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { supabaseAdmin } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { supabaseServer, supabaseAdmin } from '@/lib/db'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 import { telegramService } from '@/lib/telegram-service'
 import { addOrderEvent } from '@/lib/order-events'
 
@@ -41,6 +41,12 @@ export async function POST(
     const body = await request.json()
     const { reason } = disputeSchema.parse(body)
 
+    const db = supabaseAdmin ?? supabaseServer
+
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, db)
+
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .select('id, customer_id, assigned_seller_id, status')
@@ -52,8 +58,8 @@ export async function POST(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    const isCustomer = auth.role === 'customer' && auth.id === order.customer_id
-    const isSeller = auth.role === 'seller' && auth.id === order.assigned_seller_id
+    const isCustomer = auth.role === 'customer' && resolvedUserId === order.customer_id
+    const isSeller = auth.role === 'seller' && resolvedUserId === order.assigned_seller_id
 
     if (!isCustomer && !isSeller) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
@@ -69,7 +75,7 @@ export async function POST(
       .from('disputes')
       .insert({
         order_id: id,
-        opened_by: auth.id,
+        opened_by: resolvedUserId,
         reason,
         status: 'open',
         previous_status: previousStatus,
@@ -114,7 +120,7 @@ export async function POST(
       orderId: id,
       type: 'dispute_reported',
       message: `⚠️ Dispute opened by ${auth.role}: ${reason}`,
-      userId: auth.id,
+      userId: resolvedUserId,
     })
 
     const userIds = [order.customer_id, order.assigned_seller_id].filter(Boolean)

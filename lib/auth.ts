@@ -39,3 +39,19 @@ export function verifyToken(token: string): AuthPayload | null {
   }
 }
 
+/**
+ * Resolve the correct public.users.id from the database using the email in
+ * the JWT payload.  The JWT `id` field may carry a stale Supabase Auth UID
+ * that differs from public.users.id for legacy accounts; looking up by email
+ * guarantees we always get the real row ID used across all tables.
+ */
+export async function resolveUserId(auth: AuthPayload, db: any): Promise<string> {
+  if (!auth.email) return auth.id;
+  const { data: dbUser } = await (db as any)
+    .from('users')
+    .select('id')
+    .eq('email', auth.email)
+    .maybeSingle();
+  return dbUser?.id ?? auth.id;
+}
+

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabaseServer as supabase } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 import { decryptGameAccountSecret } from '@/lib/game-account-secrets'
 import { telegramService } from '@/lib/telegram-service'
 import { addOrderEvent } from '@/lib/order-events'
@@ -261,6 +261,10 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, supabase)
+
     const fetchOrderWithRelations = async (orderId: string) => {
       const base = await supabase
         .from('orders')
@@ -439,8 +443,8 @@ export async function GET(
     }
 
     const isAuthorized =
-      order.customer_id === auth.id ||
-      order.assigned_seller_id === auth.id ||
+      order.customer_id === resolvedUserId ||
+      order.assigned_seller_id === resolvedUserId ||
       auth.role === 'admin'
 
     if (!isAuthorized) {
@@ -457,7 +461,7 @@ export async function GET(
     }
 
     // 🔒 Hide account before seller picks order
-    if (auth.role === 'seller' && auth.id !== order.assigned_seller_id) {
+    if (auth.role === 'seller' && resolvedUserId !== order.assigned_seller_id) {
       delete order.game_account_id
       delete order.game_account
     } else if (order.game_account) {
@@ -522,6 +526,10 @@ async function updateOrderStatus(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, supabase)
+
     const body = await request.json()
     const { status, cancel_reason } = updateOrderSchema.parse(body)
     const normalizedStatus = normalizeOrderStatus(status)
@@ -549,7 +557,7 @@ async function updateOrderStatus(
     const isAdmin = auth.role === 'admin'
 
     // 🔒 Only assigned seller can mark completed
-    if (normalizedStatus === 'completed' && auth.id !== order.assigned_seller_id) {
+    if (normalizedStatus === 'completed' && resolvedUserId !== order.assigned_seller_id) {
       return NextResponse.json(
         { error: 'Only assigned seller can complete order' },
         { status: 403 }
@@ -591,7 +599,7 @@ async function updateOrderStatus(
         const { count: cancelCount, error: cancelCountError } = await supabase
           .from('orders')
           .select('id', { count: 'exact', head: true })
-          .eq(identityField, auth.id)
+          .eq(identityField, resolvedUserId)
           .eq('status', 'cancelled')
           .gte('updated_at', since)
 
@@ -621,8 +629,8 @@ async function updateOrderStatus(
 
     // 🔒 Authorization check
     const isAuthorized =
-      order.customer_id === auth.id ||
-      order.assigned_seller_id === auth.id ||
+      order.customer_id === resolvedUserId ||
+      order.assigned_seller_id === resolvedUserId ||
       auth.role === 'admin'
 
     if (!isAuthorized) {
@@ -659,7 +667,7 @@ async function updateOrderStatus(
               orderId: id,
               type: 'cancelled',
               message: `Order cancelled: ${cancel_reason?.trim() ?? 'No reason provided'}`,
-              userId: auth.id,
+              userId: resolvedUserId,
             })
           }
 
@@ -696,7 +704,7 @@ async function updateOrderStatus(
         orderId: id,
         type: 'cancelled',
         message: `Order cancelled: ${cancel_reason?.trim() ?? 'No reason provided'}`,
-        userId: auth.id,
+        userId: resolvedUserId,
       })
     }
 

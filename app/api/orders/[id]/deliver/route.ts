@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 import { telegramService } from '@/lib/telegram-service'
 import { addOrderEvent } from '@/lib/order-events'
 
@@ -23,7 +23,11 @@ export async function POST(
       return NextResponse.json({ error: 'Only sellers can mark delivery' }, { status: 403 })
     }
 
-    const db = supabaseAdmin ?? supabase
+    const db = supabaseAdmin ?? supabaseServer
+
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, db)
 
     const { data: orderData, error: orderError } = await (db
       .from('orders') as any)
@@ -40,7 +44,7 @@ export async function POST(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    if (order.assigned_seller_id !== auth.id) {
+    if (order.assigned_seller_id !== resolvedUserId) {
       return NextResponse.json({ error: 'Only the assigned seller can mark this order as delivered' }, { status: 403 })
     }
 
@@ -112,7 +116,7 @@ export async function POST(
       orderId: id,
       type: 'delivered',
       message: 'Order marked as delivered',
-      userId: auth.id,
+      userId: resolvedUserId,
     })
 
     const { data: customer } = await (db
