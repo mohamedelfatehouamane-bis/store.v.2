@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 import { telegramService } from '@/lib/telegram-service'
 import { z } from 'zod'
 
@@ -14,14 +14,14 @@ function escapeMarkdown(value: string) {
   return value.replace(/([_\*\[\]\(\)~`>#+\-=|{}.!])/g, '\\$1')
 }
 
-async function resolveSellerProfileId(db: any, auth: any) {
+async function resolveSellerProfileId(db: any, auth: any, resolvedUserId: string) {
   const fromToken = (auth as any).seller_id
   if (fromToken) return String(fromToken)
 
   const { data: sellerProfile } = await db
     .from('sellers')
     .select('id')
-    .eq('user_id', auth.id)
+    .eq('user_id', resolvedUserId)
     .maybeSingle()
 
   return sellerProfile?.id ? String(sellerProfile.id) : null
@@ -42,7 +42,10 @@ export async function GET(request: NextRequest) {
     }
 
     const db = supabaseAdmin ?? supabase
-    const sellerProfileId = await resolveSellerProfileId(db, auth)
+    // Resolve the correct public.users.id from the DB so all seller lookups
+    // use the correct DB row ID even for legacy accounts.
+    const resolvedUserId = await resolveUserId(auth, db)
+    const sellerProfileId = await resolveSellerProfileId(db, auth, resolvedUserId)
     if (!sellerProfileId) {
       return NextResponse.json({ success: true, withdrawals: [] })
     }
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url)
     const status = url.searchParams.get('status')
 
-    const sellerIdCandidates = Array.from(new Set([auth.id, sellerProfileId].filter(Boolean)))
+    const sellerIdCandidates = Array.from(new Set([resolvedUserId, sellerProfileId].filter(Boolean)))
 
     let queryBuilder = db
       .from('withdrawals')
@@ -109,7 +112,10 @@ export async function POST(request: NextRequest) {
     }
 
     const db = supabaseAdmin ?? supabase
-    const sellerProfileId = await resolveSellerProfileId(db, auth)
+    // Resolve the correct public.users.id from the DB so all seller lookups
+    // and inserts use the correct DB row ID even for legacy accounts.
+    const resolvedUserId = await resolveUserId(auth, db)
+    const sellerProfileId = await resolveSellerProfileId(db, auth, resolvedUserId)
     if (!sellerProfileId) {
       return NextResponse.json({ error: 'Seller profile not found' }, { status: 404 })
     }
@@ -120,7 +126,7 @@ export async function POST(request: NextRequest) {
     const { data, error: userError } = await db
       .from('users')
       .select('id, points')
-      .eq('id', auth.id)
+      .eq('id', resolvedUserId)
       .single()
 
     const user = data as any
@@ -158,8 +164,8 @@ export async function POST(request: NextRequest) {
     }
 
     const attempts = [
-      { seller_id: auth.id, ...baseInsert },
-      { seller_id: auth.id, ...baseInsert, payment_name: undefined },
+      { seller_id: resolvedUserId, ...baseInsert },
+      { seller_id: resolvedUserId, ...baseInsert, payment_name: undefined },
       { seller_id: sellerProfileId, ...baseInsert },
       { seller_id: sellerProfileId, ...baseInsert, payment_name: undefined },
     ]

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { verifyToken, resolveUserId } from '@/lib/auth';
 import { telegramService } from '@/lib/telegram-service';
 import { addOrderEvent } from '@/lib/order-events';
 import { z } from 'zod';
@@ -269,6 +269,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Only customers can create orders' }, { status: 403 });
     }
 
+    // Resolve the correct public.users.id by email so the order is always
+    // stored with the DB row ID, even for legacy users whose JWT carries a
+    // stale Supabase Auth UID.
+    const adminDb = supabaseAdmin ?? supabase;
+    const resolvedUserId = await resolveUserId(auth, adminDb);
+
     const body = await request.json();
     const { game_id, offer_id, exclusive_offer_id, account_id, quantity } = createOrderSchema.parse(body);
 
@@ -316,7 +322,7 @@ export async function POST(request: NextRequest) {
         .from('game_accounts')
         .select('id')
         .eq('id', account_id)
-        .eq('user_id', auth.id)
+        .eq('user_id', resolvedUserId)
         .single();
 
       if (gameAccountError || !gameAccount) {
@@ -324,7 +330,7 @@ export async function POST(request: NextRequest) {
       }
 
       orderInsertData = {
-        customer_id: auth.id,
+        customer_id: resolvedUserId,
         offer_id: null,
         assigned_seller_id: assignedSellerUserId,
         game_account_id: account_id,
@@ -423,7 +429,7 @@ export async function POST(request: NextRequest) {
         .from('game_accounts')
         .select('id, game_id')
         .eq('id', account_id)
-        .eq('user_id', auth.id)
+        .eq('user_id', resolvedUserId)
         .single();
 
       if (gameAccountError || !gameAccount) {
@@ -438,7 +444,7 @@ export async function POST(request: NextRequest) {
       }
 
       orderInsertData = {
-        customer_id: auth.id,
+        customer_id: resolvedUserId,
         // If offers table is missing, avoid FK failures by storing null.
         offer_id: usedProductFallback ? null : offer_id,
         assigned_seller_id: null,
@@ -466,7 +472,7 @@ export async function POST(request: NextRequest) {
     const { data: user, error: userError } = await db
       .from('users')
       .select('id, points, telegram_id')
-      .eq('id', auth.id)
+      .eq('id', resolvedUserId)
       .single();
 
     if (userError || !user) {
@@ -488,7 +494,7 @@ export async function POST(request: NextRequest) {
     const { error: updateError } = await db
       .from('users')
       .update(updateData)
-      .eq('id', auth.id);
+      .eq('id', resolvedUserId);
 
     if (updateError) {
       console.error('Update user points error:', updateError);
@@ -551,12 +557,12 @@ export async function POST(request: NextRequest) {
       orderId: orderData.id,
       type: 'created',
       message: 'Order created',
-      userId: auth.id,
+      userId: resolvedUserId,
     })
 
     // Record points transaction
     await db.from('point_transactions').insert({
-      user_id: auth.id,
+      user_id: resolvedUserId,
       amount: -totalCharge,
       transaction_type: 'spend',
       related_order_id: orderData.id,

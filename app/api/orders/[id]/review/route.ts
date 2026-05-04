@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 
 const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
@@ -33,6 +33,10 @@ export async function POST(
       return NextResponse.json({ error: 'Only customers can write reviews' }, { status: 403 })
     }
 
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, db)
+
     const payload = reviewSchema.parse(await request.json())
 
     const { data: order, error: orderError } = await db
@@ -45,7 +49,7 @@ export async function POST(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    if (order.customer_id !== auth.id) {
+    if (order.customer_id !== resolvedUserId) {
       return NextResponse.json({ error: 'Only the purchasing customer can review this order' }, { status: 403 })
     }
 
@@ -57,7 +61,7 @@ export async function POST(
       return NextResponse.json({ error: 'Order has no assigned seller' }, { status: 400 })
     }
 
-    if (order.assigned_seller_id === auth.id) {
+    if (order.assigned_seller_id === resolvedUserId) {
       return NextResponse.json({ error: 'Sellers cannot review themselves' }, { status: 403 })
     }
 
@@ -81,7 +85,7 @@ export async function POST(
     const reviewInsertBase = {
       order_id: orderId,
       seller_id: order.assigned_seller_id,
-      customer_id: auth.id,
+      customer_id: resolvedUserId,
       rating: payload.rating,
       comment: payload.comment?.trim() || null,
     }
@@ -91,7 +95,7 @@ export async function POST(
 
     const insertWithReviewer = await db
       .from('reviews')
-      .insert({ ...reviewInsertBase, reviewer_id: auth.id })
+      .insert({ ...reviewInsertBase, reviewer_id: resolvedUserId })
       .select('*')
       .single()
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { verifyToken, resolveUserId } from '@/lib/auth';
 import { telegramService } from '@/lib/telegram-service';
 import { addOrderEvent } from '@/lib/order-events';
 import { z } from 'zod';
@@ -29,6 +29,10 @@ export async function POST(request: NextRequest) {
 
     const db = supabaseAdmin ?? supabase;
 
+    // Resolve the correct public.users.id from the DB so all seller lookups
+    // and order assignments use the correct DB row ID.
+    const resolvedUserId = await resolveUserId(auth, db);
+
     const { data: order, error: orderError } = await db
       .from('orders')
       .select('id, status, assigned_seller_id, points_amount, customer_id, offer_id')
@@ -46,7 +50,7 @@ export async function POST(request: NextRequest) {
     const { data: seller, error: sellerError } = await db
       .from('sellers')
       .select('id, verification_status')
-      .eq('user_id', auth.id)
+      .eq('user_id', resolvedUserId)
       .maybeSingle();
 
     if (sellerError || !seller) {
@@ -90,7 +94,7 @@ export async function POST(request: NextRequest) {
     const { data: sellerCategory, error: sellerCategoryError } = await db
       .from('seller_categories')
       .select('id')
-      .eq('seller_id', auth.id)
+      .eq('seller_id', resolvedUserId)
       .eq('game_id', product.game_id)
       .eq('category_id', product.category_id)
       .maybeSingle();
@@ -109,7 +113,7 @@ export async function POST(request: NextRequest) {
     const { data: pickedOrder, error: pickError } = await db
       .from('orders')
       .update({
-        assigned_seller_id: auth.id,
+        assigned_seller_id: resolvedUserId,
         status: 'in_progress',
         picked_at: new Date().toISOString(),
       })
@@ -136,7 +140,7 @@ export async function POST(request: NextRequest) {
       .from('order_logs')
       .insert({
         order_id,
-        seller_id: auth.id,
+        seller_id: resolvedUserId,
         action: 'accept',
         result: 'success',
         details: { seller_earnings },
@@ -146,7 +150,7 @@ export async function POST(request: NextRequest) {
       orderId: order_id,
       type: 'accepted',
       message: 'Seller accepted the order',
-      userId: auth.id,
+      userId: resolvedUserId,
     })
 
     const { data: customer } = await db

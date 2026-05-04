@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 import { ensureBucket, sanitizeStorageFileName } from '@/lib/storage'
 import { telegramService } from '@/lib/telegram-service'
 import { z } from 'zod'
@@ -215,6 +215,10 @@ export async function POST(request: NextRequest) {
 
     const adminClient = supabaseAdmin
 
+    // Resolve the correct public.users.id from the DB so all topup records
+    // are stored with the correct user ID even for legacy accounts.
+    const resolvedUserId = await resolveUserId(auth, adminClient)
+
     try {
       await ensureBucket(adminClient, 'topups', '5MB')
     } catch (bucketError) {
@@ -335,7 +339,7 @@ export async function POST(request: NextRequest) {
     const { data: pendingTopups, error: pendingError } = await supabase
       .from('point_topups')
       .select('id')
-      .eq('user_id', auth.id)
+      .eq('user_id', resolvedUserId)
       .eq('status', 'pending')
       .limit(1)
 
@@ -358,7 +362,7 @@ export async function POST(request: NextRequest) {
       const { data: duplicateReferenceRows, error: duplicateReferenceError } = await supabase
         .from('point_topups')
         .select('id')
-        .eq('user_id', auth.id)
+        .eq('user_id', resolvedUserId)
         .eq('transaction_reference', transactionReference)
         .in('status', ['pending', 'approved'])
         .limit(1)
@@ -374,7 +378,7 @@ export async function POST(request: NextRequest) {
     const { data: recentTopups, error: recentTopupsError } = await supabase
       .from('point_topups')
       .select('created_at')
-      .eq('user_id', auth.id)
+      .eq('user_id', resolvedUserId)
       .order('created_at', { ascending: false })
       .limit(1)
 
@@ -428,7 +432,7 @@ export async function POST(request: NextRequest) {
       .getPublicUrl(storagePath)
 
     const basePayload: Record<string, any> = {
-      user_id: auth.id,
+      user_id: resolvedUserId,
       amount_points: amountPoints,
       proof_image: publicUrlData.publicUrl,
       status: 'pending',
@@ -509,7 +513,7 @@ export async function POST(request: NextRequest) {
     }
 
     const transactionPayload = {
-      user_id: auth.id,
+      user_id: resolvedUserId,
       amount: amountPoints,
       reference_id: insertedData.id,
       type: 'topup',
@@ -524,7 +528,7 @@ export async function POST(request: NextRequest) {
       transactionCreateResult = await adminClient
         .from('point_transactions')
         .insert({
-          user_id: auth.id,
+          user_id: resolvedUserId,
           amount: amountPoints,
           reference_id: insertedData.id,
           type: 'topup',

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 
 export async function GET(
   request: NextRequest,
@@ -23,6 +23,10 @@ export async function GET(
 
     const db = supabaseAdmin ?? supabase
 
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, db)
+
     const { data: order, error: orderError } = await db
       .from('orders')
       .select('customer_id, assigned_seller_id')
@@ -34,8 +38,8 @@ export async function GET(
     }
 
     const isAuthorized =
-      order.customer_id === auth.id ||
-      order.assigned_seller_id === auth.id ||
+      order.customer_id === resolvedUserId ||
+      order.assigned_seller_id === resolvedUserId ||
       auth.role === 'admin'
 
     if (!isAuthorized) {

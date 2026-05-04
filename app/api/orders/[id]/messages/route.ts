@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, resolveUserId } from '@/lib/auth'
 
 const db: any = supabaseAdmin ?? supabase
 
@@ -65,7 +65,10 @@ export async function GET(
     }
 
     const { id } = await params
-    const authCheck = await getAuthorizedOrder(id, auth.id, auth.role)
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, db)
+    const authCheck = await getAuthorizedOrder(id, resolvedUserId, auth.role)
     if (authCheck.error) {
       return authCheck.error
     }
@@ -140,7 +143,10 @@ export async function POST(
     }
 
     const { id } = await params
-    const authCheck = await getAuthorizedOrder(id, auth.id, auth.role)
+    // Resolve the correct public.users.id from the DB so authorization
+    // checks work even when the JWT carries a stale Supabase Auth UID.
+    const resolvedUserId = await resolveUserId(auth, db)
+    const authCheck = await getAuthorizedOrder(id, resolvedUserId, auth.role)
     if (authCheck.error) {
       return authCheck.error
     }
@@ -152,7 +158,7 @@ export async function POST(
       .from('order_messages')
       .insert({
         order_id: id,
-        sender_id: auth.id,
+        sender_id: resolvedUserId,
         content,
       })
       .select('id, sender_id, content, created_at')
@@ -179,7 +185,7 @@ export async function POST(
     const { data: sender } = await db
       .from('users')
       .select('username, avatar_url')
-      .eq('id', auth.id)
+      .eq('id', resolvedUserId)
       .maybeSingle()
 
     return NextResponse.json({
