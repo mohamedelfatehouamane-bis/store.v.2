@@ -191,15 +191,15 @@ let message = telegramService.orderUpdatedMessage(
 
 // 🔥 CUSTOM MESSAGES
 if (normalizedStatus === ORDER_STATUS.IN_PROGRESS) {
-  message = `📦 Order #${id} picked by seller`
+  message = `Order #${id} picked by seller`
 }
 
 if (normalizedStatus === ORDER_STATUS.COMPLETED) {
-  message = `✅ Order #${id} completed\n💰 Payment released`
+  message = `Order #${id} completed - Payment released`
 }
 
 if (normalizedStatus === ORDER_STATUS.CANCELLED) {
-  message = `❌ Order #${id} cancelled`
+  message = `Order #${id} cancelled`
 }
 
 await Promise.allSettled(
