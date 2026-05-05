@@ -1,660 +1,763 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db';
-import { verifyToken, resolveUserId } from '@/lib/auth';
-import { telegramService } from '@/lib/telegram-service';
-import { addOrderEvent } from '@/lib/order-events';
-import { z } from 'zod';
+import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
+import { supabase } from '@/lib/db'
+import { verifyToken } from '@/lib/auth'
+import { decryptGameAccountSecret } from '@/lib/game-account-secrets'
+import { telegramService } from '@/lib/telegram-service'
+import { addOrderEvent } from '@/lib/order-events'
+import { calculateTrustScore } from '@/lib/trust-score'
+import { normalizeStatus, ORDER_STATUS } from '@/lib/order-status'
 
-const FIXED_PLATFORM_FEE = 1;
+const MAX_CANCELLATIONS_PER_DAY = 3
 
-function toWholePoints(value: unknown, fallback = 0) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return fallback;
+const updateOrderSchema = z.object({
+  status: z.string(),
+  cancel_reason: z.string().optional(),
+})
+
+function getCancellationRefundAmount(order: any) {
+  const orderAmount = Number(order.points_amount ?? 0)
+  const platformFee = Number(order.platform_fee ?? 0)
+  return orderAmount + platformFee
+}
+
+async function hasCancellationRefund(orderId: string) {
+  const { data, error } = await supabase
+    .from('point_transactions')
+    .select('id')
+    .eq('reference_id', orderId)
+    .or('transaction_type.eq.refund,type.eq.refund')
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Cancellation refund lookup error:', error)
+    return false
   }
 
-  return Math.max(0, Math.round(numeric));
+  return Boolean(data)
 }
 
-const createOrderSchema = z.object({
-  game_id: z.string().min(1).optional(),
-  seller_id: z.string().min(1).optional(),
-  offer_id: z.string().min(1).optional(),
-  exclusive_offer_id: z.string().min(1).optional(),
-  account_id: z.string().min(1),
-  quantity: z.coerce.number().int().min(1).max(99).optional().default(1),
-}).refine(
-  (data) => (data.offer_id && data.game_id) || data.exclusive_offer_id,
-  'Either offer_id+game_id or exclusive_offer_id must be provided'
-);
+async function refundCancelledOrder(order: any) {
+  const refundAmount = getCancellationRefundAmount(order)
 
-const db: any = supabaseAdmin ?? supabase;
-
-function getAuthFromRequest(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
+  if (refundAmount <= 0 || !order.customer_id) {
+    return { success: true }
   }
 
-  const token = authHeader.substring(7);
-  return verifyToken(token);
-}
+  const { data: customer, error: customerError } = await supabase
+    .from('users')
+    .select('id, points, telegram_id')
+    .eq('id', order.customer_id)
+    .single()
 
-const dbStatusByClientStatus: Record<string, string> = {
-  pending: 'open',
-  accepted: 'in_progress',
-};
+  if (customerError || !customer) {
+    return { success: false, error: 'Customer not found for refund' }
+  }
 
-const clientStatusByDbStatus: Record<string, string> = {
-  open: 'pending',
-  accepted: 'in_progress',
-};
+  const previousPoints = Number(customer.points ?? 0)
+  const newPoints = previousPoints + refundAmount
 
-function normalizeOrderStatusForDb(status: string) {
-  return dbStatusByClientStatus[status] ?? status;
-}
+  const { error: userUpdateError } = await supabase
+    .from('users')
+    .update({ points: newPoints })
+    .eq('id', customer.id)
 
-function normalizeOrderStatusForClient(status: string) {
-  return clientStatusByDbStatus[status] ?? status;
-}
+  if (userUpdateError) {
+    console.error('Cancellation refund update error:', userUpdateError)
+    return { success: false, error: 'Unable to refund customer points' }
+  }
 
-export async function GET(request: NextRequest) {
-  try {
-    const auth = getAuthFromRequest(request);
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const transactionAttempts = [
+    {
+      user_id: customer.id,
+      amount: refundAmount,
+      transaction_type: 'refund',
+      status: 'completed',
+      reference_id: order.id,
+      related_order_id: order.id,
+      description: 'Refund after order cancellation',
+      balance_before: previousPoints,
+      balance_after: newPoints,
+    },
+    {
+      user_id: customer.id,
+      amount: refundAmount,
+      type: 'refund',
+      status: 'completed',
+      reference_id: order.id,
+      related_order_id: order.id,
+    },
+    {
+      user_id: customer.id,
+      amount: refundAmount,
+      status: 'completed',
+      reference_id: order.id,
+    },
+  ]
+
+  for (const payload of transactionAttempts) {
+    const { error: txError } = await supabase
+      .from('point_transactions')
+      .insert(payload)
+
+    if (!txError) {
+      break
     }
+  }
 
-    const { searchParams } = new URL(request.url);
-    const filter = searchParams.get('filter') || 'all';
-    const rawStatus = searchParams.get('status');
-    const status = rawStatus ? normalizeOrderStatusForDb(rawStatus) : null;
-
-    // Use admin client so custom-JWT auth is not blocked by Supabase RLS.
-    const adminDb = supabaseAdmin ?? supabase;
-
-    const baseQuery = adminDb
-      .from('orders')
-      .select(
-        `id, customer_id, assigned_seller_id, status, points_amount, seller_earnings, created_at, offer_id, product_id`
+  if (customer.telegram_id) {
+    void telegramService
+      .sendMessage(
+        customer.telegram_id,
+        telegramService.pointsTransactionMessage(refundAmount, newPoints)
       )
-      .order('created_at', { ascending: false });
+      .catch((err) => {
+        console.warn('[Orders][Cancel] Telegram refund notify skipped:', err instanceof Error ? err.message : String(err))
+      })
+  }
 
-    let queryBuilder = baseQuery;
+  return { success: true }
+}
 
-    // Resolve the current public.users.id by email so queries work even when
-    // the JWT carries a stale auth.uid() that differs from public.users.id
-    // (e.g. legacy users created before the auth-id sync migration).
-    let resolvedUserId = auth.id;
-    if (filter === 'my-orders' || filter === 'my-tasks') {
-      const { data: dbUser } = await adminDb
-        .from('users')
-        .select('id')
-        .eq('email', auth.email)
-        .maybeSingle();
-      if (dbUser?.id) {
-        resolvedUserId = dbUser.id;
+async function releaseOrderFunds(order: any) {
+  if (!order.assigned_seller_id) {
+    return { success: false, error: 'Order has no assigned seller' }
+  }
+
+  if (order.status === 'completed' || order.confirmed_at) {
+    return { success: true }
+  }
+
+  const sellerEarnings = Number(order.seller_earnings ?? 0)
+  const paymentAmount = Number(order.points_amount ?? 0)
+  const payoutAmount = sellerEarnings > 0 ? sellerEarnings : paymentAmount
+
+  if (payoutAmount <= 0) {
+    return { success: false, error: 'No seller payout is configured for this order' }
+  }
+
+  const { data: sellerUser, error: sellerUserError } = await supabase
+    .from('users')
+    .select('id, balance, points')
+    .eq('id', order.assigned_seller_id)
+    .single()
+
+  if (sellerUserError || !sellerUser) {
+    return { success: false, error: 'Seller user not found' }
+  }
+
+  const previousBalance = Number(sellerUser.balance ?? 0)
+  const newBalance = previousBalance + payoutAmount
+  const previousTotalPoints = Number(sellerUser.points ?? 0)
+  const newTotalPoints = previousTotalPoints + payoutAmount
+
+  const { error: userUpdateError } = await supabase
+    .from('users')
+    .update({
+      balance: newBalance,
+      points: newTotalPoints,
+    })
+    .eq('id', sellerUser.id)
+
+  if (userUpdateError) {
+    console.error('Seller balance update error:', userUpdateError)
+    return { success: false, error: 'Unable to credit seller account' }
+  }
+
+  const { error: txError } = await supabase
+    .from('point_transactions')
+    .insert({
+      user_id: sellerUser.id,
+      amount: payoutAmount,
+      transaction_type: 'order',
+      fee: platformFee,
+      status: 'completed',
+      reference_id: order.id,
+      related_order_id: order.id,
+      description: 'Order confirmation payout',
+      balance_before: previousBalance,
+      balance_after: newBalance,
+    })
+
+  if (txError) {
+    console.error('Order payout transaction log error:', txError)
+    return { success: false, error: 'Unable to record payout transaction' }
+  }
+
+  const now = new Date().toISOString()
+  const { error: orderUpdateError } = await supabase
+    .from('orders')
+    .update({
+      status: 'completed',
+      confirmed_at: now,
+      completed_at: now,
+      updated_at: now,
+    })
+    .eq('id', order.id)
+
+  if (orderUpdateError) {
+    console.error('Order complete update error:', orderUpdateError)
+    return { success: false, error: 'Unable to finalize order' }
+  }
+
+  const { data: sellerStats, error: sellerStatsError } = await supabase
+    .from('users')
+    .select('id, completed_orders')
+    .eq('id', sellerUser.id)
+    .maybeSingle()
+
+  if (!sellerStatsError && sellerStats) {
+    const currentCompletedOrders = Number((sellerStats as any).completed_orders ?? 0)
+    const { error: sellerCompletedUpdateError } = await supabase
+      .from('users')
+      .update({ completed_orders: currentCompletedOrders + 1 })
+      .eq('id', sellerUser.id)
+
+    if (sellerCompletedUpdateError && (sellerCompletedUpdateError as any).code !== '42703' && (sellerCompletedUpdateError as any).code !== 'PGRST204') {
+      console.error('Seller completed_orders update error:', sellerCompletedUpdateError)
+    }
+  }
+
+  return { success: true }
+}
+
+async function handleAutoConfirm(order: any) {
+  if (!order.delivered_at || order.confirmed_at || !order.auto_release_at) {
+    return { success: false }
+  }
+
+  const autoReleaseDate = new Date(order.auto_release_at)
+  if (autoReleaseDate <= new Date()) {
+    return releaseOrderFunds(order)
+  }
+
+  return { success: false }
+}
+
+// ================= GET ORDER =================
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params
+
+    const authHeader = request.headers.get('authorization')
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const token = authHeader.substring(7)
+    const auth = verifyToken(token)
+
+    if (!auth) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const fetchOrderWithRelations = async (orderId: string) => {
+      const base = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .single()
+
+      if (base.error || !base.data) {
+        return { data: base.data, error: base.error }
       }
-    }
-    // Also include the Supabase Auth UID in case old data was stored with
-    // customer_id = auth.uid() (before public.users.id was synced to auth.uid).
-    const candidateSet = new Set([auth.id, resolvedUserId].filter(Boolean));
-    if ((filter === 'my-orders' || filter === 'my-tasks') && supabaseAdmin && auth.email) {
-      try {
-        const { data: authUserLookup } = await supabaseAdmin.auth.admin.getUserByEmail(auth.email);
-        if (authUserLookup?.user?.id) candidateSet.add(authUserLookup.user.id);
-      } catch {
-        // Non-critical – continue with the IDs we already have.
+
+      const nextOrder: any = {
+        ...base.data,
+        seller: null,
+        customer: null,
+        offer: null,
+        game_account: null,
       }
-    }
-    // Include all known identity candidates so we catch orders created under any ID.
-    const userIdCandidates = Array.from(candidateSet);
 
-    if (filter === 'my-orders') {
-      queryBuilder = userIdCandidates.length > 1
-        ? queryBuilder.in('customer_id', userIdCandidates)
-        : queryBuilder.eq('customer_id', resolvedUserId);
-    } else if (filter === 'my-tasks') {
-      queryBuilder = userIdCandidates.length > 1
-        ? queryBuilder.in('assigned_seller_id', userIdCandidates)
-        : queryBuilder.eq('assigned_seller_id', resolvedUserId);
-    } else if (filter === 'available') {
-      // Only show open orders that haven't been assigned to a seller yet.
-      queryBuilder = queryBuilder.eq('status', 'open').is('assigned_seller_id', null);
-    }
+      if (nextOrder.assigned_seller_id) {
+        let sellerResult = await supabase
+          .from('users')
+          .select('username, avatar_url, rating, total_reviews, completed_orders, dispute_count')
+          .eq('id', nextOrder.assigned_seller_id)
+          .maybeSingle()
 
-    if (status) {
-      queryBuilder = queryBuilder.eq('status', status);
-    }
+        if (sellerResult.error && ((sellerResult.error as any).code === '42703' || (sellerResult.error as any).code === 'PGRST204')) {
+          sellerResult = await supabase
+            .from('users')
+            .select('username, avatar_url')
+            .eq('id', nextOrder.assigned_seller_id)
+            .maybeSingle()
+        }
 
-    const { data, error } = await queryBuilder;
-    if (error) {
-      console.error('Get orders error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    let orders = (data ?? []) as any[];
-
-    if (filter === 'available' && auth.role !== 'seller' && auth.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
-    // Fetch offer details for all orders
-    const offerIds = [...new Set(orders.map((o: any) => o.offer_id).filter(Boolean))];
-    const offersMap: Record<string, any> = {};
-    
-    if (offerIds.length > 0) {
-      const { data: offersData } = await adminDb
-        .from('offers')
-        .select('id, points_price, product_id')
-        .in('id', offerIds);
-      
-      if (offersData) {
-        // Now fetch product details for all products
-        const productIds = [...new Set((offersData as any[]).map((o: any) => o.product_id).filter(Boolean))];
-        const productsMap: Record<string, any> = {};
-        
-        if (productIds.length > 0) {
-          const { data: productsData } = await adminDb
-            .from('products')
-            .select('id, name, game_id, category_id')
-            .in('id', productIds);
-          
-          if (productsData) {
-            // Fetch game details
-            const gameIds = [...new Set((productsData as any[]).map((p: any) => p.game_id).filter(Boolean))];
-            const gamesMap: Record<string, any> = {};
-            
-            if (gameIds.length > 0) {
-              const { data: gamesData } = await adminDb
-                .from('games')
-                .select('id, name')
-                .in('id', gameIds);
-              
-              if (gamesData) {
-                (gamesData as any[]).forEach((g: any) => {
-                  gamesMap[g.id] = g.name;
-                });
-              }
-            }
-            
-            (productsData as any[]).forEach((p: any) => {
-              productsMap[p.id] = {
-                name: p.name,
-                game_id: p.game_id ?? null,
-                game_name: gamesMap[p.game_id] ?? '',
-                category_id: p.category_id ?? null,
-              };
-            });
+        if (sellerResult.data) {
+          nextOrder.seller = {
+            ...sellerResult.data,
+            trust_score: calculateTrustScore(sellerResult.data as any),
           }
         }
-        
-        (offersData as any[]).forEach((o: any) => {
-          const product = productsMap[o.product_id] ?? { name: '', game_name: '', category_id: null };
-          offersMap[o.id] = { points_price: o.points_price, ...product };
-        });
       }
-    }
 
-    if (filter === 'available' && auth.role === 'seller') {
-      // Resolve the DB user id by email so seller_categories lookup works even
-      // when the JWT carries a stale id from before the auth-id sync migration.
-      let sellerDbId = auth.id;
-      {
-        const { data: sellerDbUser } = await adminDb
+      if (nextOrder.customer_id) {
+        const customerResult = await supabase
           .from('users')
-          .select('id')
-          .eq('email', auth.email)
-          .maybeSingle();
-        if (sellerDbUser?.id) sellerDbId = sellerDbUser.id;
-      }
-      const sellerCandidates = Array.from(new Set([auth.id, sellerDbId].filter(Boolean)));
+          .select('username')
+          .eq('id', nextOrder.customer_id)
+          .maybeSingle()
 
-      const { data: sellerAssignments, error: assignmentsError } = await adminDb
-        .from('seller_categories')
-        .select('game_id, category_id')
-        .in('seller_id', sellerCandidates);
-
-      if (assignmentsError) {
-        return NextResponse.json({ error: assignmentsError.message }, { status: 500 });
+        if (customerResult.data) {
+          nextOrder.customer = customerResult.data
+        }
       }
 
-      // Build a set of "game_id:category_id" pairs the seller is authorized for.
-      const allowedPairs = new Set(
-        (sellerAssignments ?? [])
-          .filter((row: any) => row.game_id && row.category_id)
-          .map((row: any) => `${row.game_id}:${row.category_id}`)
-      );
+      if (nextOrder.game_account_id) {
+        const accountResult = await supabase
+          .from('game_accounts')
+          .select('id, account_identifier, account_email, account_password_encrypted, game_id')
+          .eq('id', nextOrder.game_account_id)
+          .maybeSingle()
 
-      orders = orders.filter((order: any) => {
-        const offerEntry = offersMap[order.offer_id];
-        if (!offerEntry?.game_id || !offerEntry?.category_id) return false;
-        return allowedPairs.has(`${offerEntry.game_id}:${offerEntry.category_id}`);
-      });
+        if (accountResult.data) {
+          nextOrder.game_account = accountResult.data
+        }
+      }
+
+      if (nextOrder.offer_id) {
+        const offerResult = await supabase
+          .from('offers')
+          .select('id, name, points_price, product_id')
+          .eq('id', nextOrder.offer_id)
+          .maybeSingle()
+
+        if (offerResult.data) {
+          const productResult = await supabase
+            .from('products')
+            .select('id, name, game_id')
+            .eq('id', offerResult.data.product_id)
+            .maybeSingle()
+
+          let gameData: any = null
+          if (productResult.data?.game_id) {
+            const gameResult = await supabase
+              .from('games')
+              .select('name')
+              .eq('id', productResult.data.game_id)
+              .maybeSingle()
+            gameData = gameResult.data ? { name: gameResult.data.name } : null
+          }
+
+          nextOrder.offer = {
+            name: offerResult.data.name,
+            points_price: offerResult.data.points_price,
+            product: {
+              name: productResult.data?.name ?? null,
+              game: gameData,
+            },
+          }
+        } else {
+          // Fallback when offers table is missing and order.offer_id stores product id.
+          const productFallback = await supabase
+            .from('products')
+            .select('id, name, points_price, game_id')
+            .eq('id', nextOrder.offer_id)
+            .maybeSingle()
+
+          if (productFallback.data) {
+            let gameData: any = null
+            if (productFallback.data.game_id) {
+              const gameResult = await supabase
+                .from('games')
+                .select('name')
+                .eq('id', productFallback.data.game_id)
+                .maybeSingle()
+              gameData = gameResult.data ? { name: gameResult.data.name } : null
+            }
+
+            nextOrder.offer = {
+              name: productFallback.data.name,
+              points_price: productFallback.data.points_price,
+              product: {
+                name: productFallback.data.name,
+                game: gameData,
+              },
+            }
+          }
+        }
+      }
+
+      if (!nextOrder.offer) {
+        const fallbackProductName =
+          nextOrder.product_name ??
+          nextOrder.offer_name ??
+          nextOrder.title ??
+          'Order service'
+
+        let fallbackGameName: string | null =
+          nextOrder.game_name ??
+          null
+
+        const gameIdFromOrder =
+          nextOrder.game_id ??
+          nextOrder.game_account?.game_id ??
+          null
+
+        if (!fallbackGameName && gameIdFromOrder) {
+          const fallbackGame = await supabase
+            .from('games')
+            .select('name')
+            .eq('id', gameIdFromOrder)
+            .maybeSingle()
+
+          fallbackGameName = fallbackGame.data?.name ?? null
+        }
+
+        nextOrder.offer = {
+          name: fallbackProductName,
+          points_price: Number(nextOrder.points_amount ?? 0),
+          product: {
+            name: fallbackProductName,
+            game: fallbackGameName ? { name: fallbackGameName } : null,
+          },
+        }
+      }
+
+      return { data: nextOrder, error: null }
     }
 
-    const normalizedOrders = orders.map((order) => {
-      const offer = offersMap[order.offer_id] ?? { points_price: null, name: '', game_name: '' };
-      const pointsPrice = offer.points_price || order.points_amount || 0;
-      const sellerEarnings = Number(order.seller_earnings ?? 0) || pointsPrice;
-      return {
-        id: order.id,
-        product_name: offer.name ?? '',
-        game_name: offer.game_name ?? '',
-        status: normalizeOrderStatusForClient(order.status),
-        points_price: pointsPrice,
-        seller_earnings: sellerEarnings,
-        assigned_seller_id: order.assigned_seller_id,
-        created_at: order.created_at,
-      };
-    });
+    const orderResponse = await fetchOrderWithRelations(id)
+
+    let order = orderResponse.data
+    const error = orderResponse.error
+
+    if (error || !order) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+    }
+
+    const isAuthorized =
+      order.customer_id === auth.id ||
+      order.assigned_seller_id === auth.id ||
+      auth.role === 'admin'
+
+    if (!isAuthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
+    const autoConfirmResult = await handleAutoConfirm(order)
+    if (autoConfirmResult.success) {
+      const refreshed = await fetchOrderWithRelations(id)
+
+      if (!refreshed.error && refreshed.data) {
+        order = refreshed.data
+      }
+    }
+
+    // 🔒 Hide account before seller picks order
+    if (auth.role === 'seller' && auth.id !== order.assigned_seller_id) {
+      delete order.game_account_id
+      delete order.game_account
+    } else if (order.game_account) {
+      const decryptedPassword = decryptGameAccountSecret(order.game_account.account_password_encrypted)
+      order.game_account = {
+        ...order.game_account,
+        account_password: decryptedPassword,
+      }
+      delete order.game_account.account_password_encrypted
+    }
+
+    const unitPrice = Number(order.offer?.points_price ?? 0)
+    const totalAmount = Number(order.points_amount ?? 0)
+    const quantity = unitPrice > 0 ? Math.max(1, Math.round(totalAmount / unitPrice)) : 1
+    const platformFee = Number(order.platform_fee ?? 1)
+    const totalCharge = totalAmount + platformFee
+
+    const deliveredAt = order.delivered_at ?? order.approved_at ?? null
+    const confirmedAt = order.confirmed_at ?? order.completed_at ?? null
+    const normalizedStatus = normalizeStatus(order.status)
+    const displayStatus = normalizedStatus === ORDER_STATUS.IN_PROGRESS && deliveredAt ? ORDER_STATUS.DELIVERED : normalizedStatus
 
     return NextResponse.json({
       success: true,
-      orders: normalizedOrders,
-    });
+      order: {
+        ...order,
+        quantity,
+        platform_fee: platformFee,
+        total_charge: totalCharge,
+        delivered_at: deliveredAt,
+        confirmed_at: confirmedAt,
+        status: displayStatus,
+      },
+    })
   } catch (error) {
-    console.error('Get orders error:', error);
+    console.error('Get order error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { error: 'Internal server error' },
       { status: 500 }
-    );
+    )
   }
 }
 
-export async function POST(request: NextRequest) {
+// ================= UPDATE ORDER =================
+async function updateOrderStatus(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    const auth = getAuthFromRequest(request);
-    if (!auth || auth.role !== 'customer') {
-      return NextResponse.json({ error: 'Only customers can create orders' }, { status: 403 });
+    const { id } = await params
+
+    const authHeader = request.headers.get('authorization')
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Resolve the correct public.users.id by email so the order is always
-    // stored with the DB row ID, even for legacy users whose JWT carries a
-    // stale Supabase Auth UID.
-    const adminDb = supabaseAdmin ?? supabase;
-    const resolvedUserId = await resolveUserId(auth, adminDb);
+    const token = authHeader.substring(7)
+    const auth = verifyToken(token)
 
-    const body = await request.json();
-    const { game_id, offer_id, exclusive_offer_id, account_id, quantity } = createOrderSchema.parse(body);
+    if (!auth) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
-    // Determine order type and get pricing
-    let pointsPrice: number;
-    let assignedSellerUserId: string | null = null;
-    let orderInsertData: any;
-    let gameName = 'Unknown Game';
-    let offerName = 'Unknown Offer';
-    let notificationProductType: 'admin' | 'exclusive' = 'admin';
-    let notificationProductSellerId: string | null = null;
-    let notificationProductName = 'Order';
-    const orderQuantity = Number(quantity ?? 1);
+    const body = await request.json()
+    const { status, cancel_reason } = updateOrderSchema.parse(body)
+    const normalizedStatus = normalizeStatus(status)
 
-    if (exclusive_offer_id) {
-      // Handle exclusive offer order
-      const { data: exclusiveOffer, error: exclusiveOfferError } = await db
-        .from('products')
-        .select('id, name, points_price, seller_id, status, game:game_id(name)')
-        .eq('id', exclusive_offer_id)
-        .eq('is_active', true)
-        .eq('type', 'exclusive')
-        .single();
-
-      if (exclusiveOfferError || !exclusiveOffer) {
-        console.error('Exclusive offer query error:', exclusiveOfferError);
-        return NextResponse.json({ error: 'Exclusive offer not found' }, { status: 404 });
-      }
-
-      if (exclusiveOffer.status && exclusiveOffer.status !== 'approved') {
-        return NextResponse.json({ error: 'This pack is not available' }, { status: 400 });
-      }
-
-      const basePrice = toWholePoints(exclusiveOffer.points_price, 0);
-      pointsPrice = basePrice * orderQuantity;
-      assignedSellerUserId = String(exclusiveOffer.seller_id);
-      gameName = exclusiveOffer.game?.name ?? 'Exclusive Offer';
-      offerName = `${exclusiveOffer.name ?? 'Exclusive Pack'} x${orderQuantity}`;
-      notificationProductType = 'exclusive';
-      notificationProductSellerId = assignedSellerUserId;
-      notificationProductName = exclusiveOffer.name ?? 'Exclusive Pack';
-
-      // Verify game account exists and belongs to user
-      const { data: gameAccount, error: gameAccountError } = await db
-        .from('game_accounts')
-        .select('id')
-        .eq('id', account_id)
-        .eq('user_id', resolvedUserId)
-        .single();
-
-      if (gameAccountError || !gameAccount) {
-        return NextResponse.json({ error: 'Game account not found' }, { status: 404 });
-      }
-
-      orderInsertData = {
-        customer_id: resolvedUserId,
-        offer_id: null,
-        assigned_seller_id: assignedSellerUserId,
-        game_account_id: account_id,
-        points_amount: pointsPrice,
-        status: 'open',
-      };
-    } else if (offer_id && game_id) {
-      // Handle standard offer order
-      const { data: offer, error: offerError } = await db
-        .from('offers')
-        .select('id, name, points_price, product:product_id(id, name, type, seller_id, game:game_id(name))')
-        .eq('id', offer_id)
-        .eq('is_active', true)
-        .single();
-
-      let resolvedProductType: 'admin' | 'exclusive' = 'admin';
-      let resolvedProductSellerId: string | null = null;
-      let resolvedOfferDisplayName = 'Offer';
-      let basePrice = 0;
-      let usedProductFallback = false;
-
-      if (offerError?.code === 'PGRST205' || !offer) {
-        // Some deployments no longer have an offers table. In that case,
-        // the client sends a product id as offer_id and we price directly from products.
-        usedProductFallback = true;
-        const { data: product, error: productError } = await db
-          .from('products')
-          .select('id, name, points_price, type, seller_id, game_id, game:game_id(name)')
-          .eq('id', offer_id)
-          .eq('is_active', true)
-          .single();
-
-        if (productError || !product) {
-          console.error('Offer fallback product query error:', productError);
-          return NextResponse.json({ error: 'Offer not found' }, { status: 404 });
-        }
-
-        if (String(product.game_id) !== String(game_id)) {
-          return NextResponse.json(
-            { error: 'Selected offer does not belong to the selected game' },
-            { status: 400 }
-          );
-        }
-
-        gameName = product.game?.name ?? 'Game Service';
-        resolvedOfferDisplayName = product.name ?? 'Offer';
-        resolvedProductType = product.type === 'exclusive' ? 'exclusive' : 'admin';
-        resolvedProductSellerId = product.seller_id ? String(product.seller_id) : null;
-        basePrice = toWholePoints(product.points_price, 0);
-      } else {
-        const productGameId = offer.product?.game_id;
-        if (!productGameId) {
-          return NextResponse.json({ error: 'Offer product is invalid' }, { status: 404 });
-        }
-
-        if (String(productGameId) !== String(game_id)) {
-          return NextResponse.json(
-            { error: 'Selected offer does not belong to the selected game' },
-            { status: 400 }
-          );
-        }
-
-        gameName = offer.product?.game?.name ?? 'Game Service';
-        resolvedOfferDisplayName = offer.name ?? offer.product?.name ?? 'Offer';
-        resolvedProductType = offer.product?.type === 'exclusive' ? 'exclusive' : 'admin';
-        resolvedProductSellerId = offer.product?.seller_id ? String(offer.product?.seller_id) : null;
-        basePrice = toWholePoints(offer.points_price, 0);
-      }
-
-      // Validate at least one verified seller is available for this game.
-      const { data: candidates, error: candidatesError } = await db
-        .from('seller_games')
-        .select('seller:seller_id(id, user_id, verification_status)')
-        .eq('game_id', game_id)
-
-      if (candidatesError) {
-        console.error('Seller candidate query error:', candidatesError)
-        return NextResponse.json({ error: 'Unable to route order' }, { status: 500 })
-      }
-
-      const verifiedCandidate = (candidates ?? []).find(
-        (row: any) => row.seller?.user_id && row.seller?.verification_status === 'verified'
-      )
-
-      if (!verifiedCandidate?.seller?.user_id) {
-        return NextResponse.json({ error: 'No verified sellers available for this game' }, { status: 400 })
-      }
-
-      notificationProductType = resolvedProductType;
-      notificationProductSellerId = resolvedProductSellerId;
-      notificationProductName = resolvedOfferDisplayName;
-
-      pointsPrice = basePrice * orderQuantity;
-
-      const { data: gameAccount, error: gameAccountError } = await db
-        .from('game_accounts')
-        .select('id, game_id')
-        .eq('id', account_id)
-        .eq('user_id', resolvedUserId)
-        .single();
-
-      if (gameAccountError || !gameAccount) {
-        return NextResponse.json({ error: 'Game account not found' }, { status: 404 });
-      }
-
-      if (String(gameAccount.game_id) !== String(game_id)) {
-        return NextResponse.json(
-          { error: 'Selected game account does not match the selected game' },
-          { status: 400 }
-        );
-      }
-
-      orderInsertData = {
-        customer_id: resolvedUserId,
-        // If offers table is missing, avoid FK failures by storing null.
-        offer_id: usedProductFallback ? null : offer_id,
-        assigned_seller_id: null,
-        game_account_id: account_id,
-        points_amount: pointsPrice,
-        status: 'open',
-      };
-
-      offerName = `${resolvedOfferDisplayName} x${orderQuantity}`;
-    } else {
+    if (!normalizedStatus) {
       return NextResponse.json(
-        { error: 'Invalid request parameters' },
+        { error: 'Status is required' },
         { status: 400 }
-      );
+      )
     }
 
-    const normalizedPointsPrice = toWholePoints(pointsPrice, 0);
-    orderInsertData.points_amount = normalizedPointsPrice;
+    // 🔍 Get order
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('customer_id, assigned_seller_id, status, points_amount, platform_fee')
+      .eq('id', id)
+      .single()
 
-    // Customer pays a fixed platform fee per order.
-    const platformFee = FIXED_PLATFORM_FEE;
-    const totalCharge = normalizedPointsPrice + platformFee;
-
-    // Verify user has enough points
-    const { data: user, error: userError } = await db
-      .from('users')
-      .select('id, points, telegram_id')
-      .eq('id', resolvedUserId)
-      .single();
-
-    if (userError || !user) {
-      console.error('User query error:', userError);
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    if (error || !order) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    const currentUser = user as any;
-    const customerPoints = toWholePoints(currentUser.points, 0);
+    const isSeller = auth.role === 'seller'
+    const isCustomer = auth.role === 'customer'
+    const isAdmin = auth.role === 'admin'
+    const existingStatus = normalizeStatus(order.status)
 
-    if (customerPoints < totalCharge) {
-      return NextResponse.json({ error: 'Insufficient points' }, { status: 400 });
+    // 🔒 Only assigned seller can mark completed
+    if (normalizedStatus === ORDER_STATUS.COMPLETED && auth.id !== order.assigned_seller_id) {
+      return NextResponse.json(
+        { error: 'Only assigned seller can complete order' },
+        { status: 403 }
+      )
     }
 
-    // Deduct points from user
-    const pointsRemaining = customerPoints - totalCharge;
-    const updateData: any = { points: pointsRemaining };
+    if (existingStatus === ORDER_STATUS.DISPUTED && !isAdmin) {
+      return NextResponse.json({ error: 'Order changes are disabled while a dispute is active' }, { status: 400 })
+    }
 
-    const { error: updateError } = await db
-      .from('users')
-      .update(updateData)
-      .eq('id', resolvedUserId);
+    if (normalizedStatus === ORDER_STATUS.CANCELLED) {
+      const alreadyRefunded = await hasCancellationRefund(id)
+
+      if (existingStatus === ORDER_STATUS.CANCELLED && alreadyRefunded) {
+        return NextResponse.json({ error: 'Order is already cancelled' }, { status: 400 })
+      }
+
+      if (existingStatus === ORDER_STATUS.COMPLETED) {
+        return NextResponse.json({ error: 'Completed orders cannot be cancelled' }, { status: 400 })
+      }
+
+      if (!isAdmin) {
+        if (isCustomer && existingStatus !== ORDER_STATUS.PENDING) {
+          return NextResponse.json(
+            { error: 'Customers can only cancel orders before seller accepts' },
+            { status: 403 }
+          )
+        }
+
+        if (isSeller && ![ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(existingStatus)) {
+          return NextResponse.json(
+            { error: 'Sellers can only reject active orders before completion' },
+            { status: 403 }
+          )
+        }
+
+        const identityField = isSeller ? 'assigned_seller_id' : 'customer_id'
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        const { count: cancelCount, error: cancelCountError } = await supabase
+          .from('orders')
+          .select('id', { count: 'exact', head: true })
+          .eq(identityField, auth.id)
+          .eq('status', 'cancelled')
+          .gte('updated_at', since)
+
+        if (cancelCountError) {
+          console.error('Cancel rate limit check failed:', cancelCountError)
+          return NextResponse.json(
+            { error: 'Unable to validate cancellation limit' },
+            { status: 500 }
+          )
+        }
+
+        if ((cancelCount ?? 0) >= MAX_CANCELLATIONS_PER_DAY) {
+          return NextResponse.json(
+            { error: `You have reached the maximum of ${MAX_CANCELLATIONS_PER_DAY} cancellations in the last 24 hours` },
+            { status: 429 }
+          )
+        }
+      }
+
+      if (!cancel_reason?.trim()) {
+        return NextResponse.json(
+          { error: 'Cancellation reason is required' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // 🔒 Authorization check
+    const isAuthorized =
+      order.customer_id === auth.id ||
+      order.assigned_seller_id === auth.id ||
+      auth.role === 'admin'
+
+    if (!isAuthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
+    const updatePayload: any = {
+      status: normalizedStatus,
+      updated_at: new Date().toISOString(),
+    }
+
+    if (normalizedStatus === 'cancelled') {
+      updatePayload.cancel_reason = cancel_reason?.trim() ?? null
+    }
+
+    const { error: updateError } = await supabase
+      .from('orders')
+      .update(updatePayload)
+      .eq('id', id)
 
     if (updateError) {
-      console.error('Update user points error:', updateError);
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      if (updatePayload.cancel_reason && updateError.message?.includes('cancel_reason')) {
+        console.warn('Orders table missing cancel_reason column, retrying update without it')
+        delete updatePayload.cancel_reason
+
+        const { error: retryError } = await supabase
+          .from('orders')
+          .update(updatePayload)
+          .eq('id', id)
+
+        if (!retryError) {
+          if (normalizedStatus === 'cancelled') {
+            await addOrderEvent(supabase, {
+              orderId: id,
+              type: 'cancelled',
+              message: `Order cancelled: ${cancel_reason?.trim() ?? 'No reason provided'}`,
+              userId: auth.id,
+            })
+          }
+
+          return NextResponse.json({
+            success: true,
+            message: normalizedStatus === 'cancelled'
+              ? 'Order cancelled successfully'
+              : 'Order updated successfully',
+          })
+        }
+      }
+
+      return NextResponse.json(
+        { error: updateError.message },
+        { status: 500 }
+      )
     }
 
-    // Create order. Try full payload first (includes platform_fee/seller_earnings),
-    // then fallback for older schemas without those columns.
-    const orderPayloadWithLabels = {
-      ...orderInsertData,
-      product_name: notificationProductName,
-      game_name: gameName,
-      offer_name: offerName,
-      platform_fee: platformFee,
-      seller_earnings: normalizedPointsPrice,
-    };
+    if (normalizedStatus === 'cancelled') {
+      const refundAlreadyRecorded = await hasCancellationRefund(id)
 
-    const orderPayloadFull = {
-      ...orderInsertData,
-      platform_fee: platformFee,
-      seller_earnings: normalizedPointsPrice,
-    };
+      if (!refundAlreadyRecorded) {
+        const refundResult = await refundCancelledOrder(order)
+        if (!refundResult.success) {
+          console.error('Cancellation refund failed:', refundResult.error)
+          return NextResponse.json(
+            { error: refundResult.error || 'Order cancelled but refund failed' },
+            { status: 500 }
+          )
+        }
+      }
 
-    let orderData: any = null;
-    let orderError: any = null;
-    const insertWithLabels = await db
-      .from('orders')
-      .insert(orderPayloadWithLabels)
-      .select('id')
-      .single();
-    orderData = insertWithLabels.data;
-    orderError = insertWithLabels.error;
-
-    if (orderError && (orderError.code === '42703' || orderError.code === 'PGRST204')) {
-      const insertFull = await db
-        .from('orders')
-        .insert(orderPayloadFull)
-        .select('id')
-        .single();
-      orderData = insertFull.data;
-      orderError = insertFull.error;
+      await addOrderEvent(supabase, {
+        orderId: id,
+        type: 'cancelled',
+        message: `Order cancelled: ${cancel_reason?.trim() ?? 'No reason provided'}`,
+        userId: auth.id,
+      })
     }
 
-    if (orderError && (orderError.code === '42703' || orderError.code === 'PGRST204')) {
-      const insertFallback = await db
-        .from('orders')
-        .insert(orderInsertData)
-        .select('id')
-        .single();
-      orderData = insertFallback.data;
-      orderError = insertFallback.error;
+    if (normalizedStatus === 'cancelled') {
+      // Cancellation refunds are handled above so the customer gets points back.
     }
 
-    if (orderError || !orderData) {
-      console.error('Create order error:', orderError);
-      return NextResponse.json({ error: orderError?.message || 'Unable to create order' }, { status: 500 });
+    const recipients: Array<string> = []
+
+    const { data: customer } = await supabase
+      .from('users')
+      .select('telegram_id')
+      .eq('id', order.customer_id)
+      .maybeSingle()
+
+    if (customer?.telegram_id) {
+      recipients.push(customer.telegram_id)
     }
 
-    await addOrderEvent(db, {
-      orderId: orderData.id,
-      type: 'created',
-      message: 'Order created',
-      userId: resolvedUserId,
-    })
-
-    // Record points transaction
-    await db.from('point_transactions').insert({
-      user_id: resolvedUserId,
-      amount: -totalCharge,
-      transaction_type: 'spend',
-      related_order_id: orderData.id,
-      description: exclusive_offer_id
-        ? `Exclusive offer order x${orderQuantity} (fee: ${platformFee})`
-        : `Order creation x${orderQuantity} (fee: ${platformFee})`,
-    });
-
-    const customerTelegramId = (currentUser as any)?.telegram_id ?? null
-    const orderIdText = String(orderData.id)
-
-    if (customerTelegramId) {
-      void telegramService
-        .sendMessage(customerTelegramId, telegramService.orderCreatedMessage(orderIdText))
-        .catch((telegramError) => {
-          console.error('Order created notify failed:', telegramError)
-        })
-
-      void telegramService
-        .sendMessage(
-          customerTelegramId,
-          telegramService.pointsTransactionMessage(-totalCharge, pointsRemaining)
-        )
-        .catch((telegramError) => {
-          console.error('Order points notify failed:', telegramError)
-        })
-    }
-
-    const clientUrl = process.env.CLIENT_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const orderUrl = `${clientUrl}/dashboard/orders/${orderData.id}`;
-    const orderLinkMarkup = {
-      inline_keyboard: [[{ text: 'View Order', url: orderUrl }]],
-    };
-
-    if (notificationProductType === 'exclusive' && notificationProductSellerId) {
-      const { data: seller, error: sellerError } = await db
+    if (order.assigned_seller_id) {
+      const { data: seller } = await supabase
         .from('users')
         .select('telegram_id')
-        .eq('id', notificationProductSellerId)
-        .maybeSingle();
+        .eq('id', order.assigned_seller_id)
+        .maybeSingle()
 
-      const sellerChatId = seller?.telegram_id ?? null;
-      if (sellerChatId) {
-        void telegramService
-          .sendMessage(
-            sellerChatId,
-            `📦 <b>New Order on Your Product</b>\n\n📦 ${notificationProductName}\n🆔 Order: ${orderIdText}`,
-            { replyMarkup: orderLinkMarkup }
-          )
-          .catch((telegramError) => {
-            console.error('Seller notify failed:', telegramError);
-          });
-      }
-    } else if (notificationProductType === 'admin') {
-      const sellersGroupId = process.env.TELEGRAM_GROUP_CHAT_ID;
-      if (sellersGroupId) {
-        void telegramService
-          .sendMessage(
-            sellersGroupId,
-            `🔥 <b>New Order Available</b>\n\n📦 ${notificationProductName}\n🆔 Order: ${orderIdText}\n⚡ First seller can accept`,
-            { replyMarkup: orderLinkMarkup }
-          )
-          .catch((telegramError) => {
-            console.error('Sellers group notify failed:', telegramError);
-          });
+      if (seller?.telegram_id) {
+        recipients.push(seller.telegram_id)
       }
     }
 
-    return NextResponse.json(
-      {
-        success: true,
-        id: orderData.id,
-        order_id: orderData.id,
-        points_amount: normalizedPointsPrice,
-        platform_fee: platformFee,
-        total_charge: totalCharge,
-        message: 'Order created successfully. Waiting for seller to pick.',
-      },
-      { status: 201 }
-    );
+    if (recipients.length > 0) {
+      const message = telegramService.orderUpdatedMessage(String(id), String(normalizedStatus))
+      await Promise.allSettled(
+        recipients.map((chatId) =>
+          telegramService.sendMessage(chatId, message).catch((err) => {
+            console.warn('[Orders][Update] Telegram notify skipped:', err instanceof Error ? err.message : String(err))
+          })
+        )
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: normalizedStatus === 'cancelled' ? 'Order cancelled successfully' : 'Order updated successfully',
+    })
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
-        { status: 400 }
-      );
-    }
-
-    console.error('Create order error:', error);
+    console.error('Update order error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { error: 'Internal server error' },
       { status: 500 }
-    );
+    )
   }
+}
+
+export async function PUT(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  return updateOrderStatus(request, context)
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  return updateOrderStatus(request, context)
 }
