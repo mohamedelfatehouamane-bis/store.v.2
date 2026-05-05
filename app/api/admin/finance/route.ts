@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer as supabase } from '@/lib/db'
 import { verifyToken } from '@/lib/auth'
+import { normalizeStatus, ORDER_STATUS } from '@/lib/order-status'
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     }
 
     const transactions = transactionsRes.data ?? []
-    const completedOrders = (ordersRes.data ?? []).filter((order: any) => order.status === 'completed')
+    const completedOrders = (ordersRes.data ?? []).filter((order: any) => normalizeStatus(order.status) === ORDER_STATUS.COMPLETED)
 
     const topupsTotal = transactions
       .filter((t: any) => t.transaction_type === 'topup' && t.status === 'completed')
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
 
       const monthOrdersCompleted = (ordersRes.data ?? []).filter((order: any) => {
         const created = new Date(order.created_at)
-        return created.getMonth() === month && created.getFullYear() === year && order.status === 'completed'
+        return created.getMonth() === month && created.getFullYear() === year && normalizeStatus(order.status) === ORDER_STATUS.COMPLETED
       }).length
 
       return {

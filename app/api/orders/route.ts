@@ -79,8 +79,12 @@ export async function GET(request: NextRequest) {
     const rawStatus = searchParams.get('status');
     const statusFilters = rawStatus ? resolveDbStatusFilters(rawStatus) : null;
 
-    // Use admin client for admin users to bypass RLS, regular client for others
-    const db = auth.role === 'admin' && supabaseAdmin ? supabaseAdmin : supabase;
+    // Always use the service-role client on the server to bypass Supabase RLS.
+    // This app authenticates via custom JWT (not Supabase Auth), so auth.uid()
+    // is null inside RLS policies and the anon client would return 0 rows for
+    // every role.  Authorization is enforced below via customer_id /
+    // assigned_seller_id filters in application code.
+    const db = supabaseAdmin ?? supabase;
 
 
     const baseQuery = db
@@ -98,8 +102,18 @@ export async function GET(request: NextRequest) {
     } else if (filter === 'my-tasks') {
       queryBuilder = queryBuilder.eq('assigned_seller_id', auth.id);
     } else if (filter === 'available') {
+      // Only sellers and admins may browse the available-task pool.
+      if (auth.role !== 'seller' && auth.role !== 'admin') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
       // Only show open/pending orders that haven't been assigned to a seller yet.
       queryBuilder = queryBuilder.in('status', ['open', ORDER_STATUS.PENDING]).is('assigned_seller_id', null);
+    } else {
+      // 'all' (default) – only admins may see every order.  Customers and
+      // sellers must use an explicit filter so they never leak other users' data.
+      if (auth.role !== 'admin') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
     }
 
     if (statusFilters && statusFilters.length > 0) {
@@ -113,10 +127,6 @@ export async function GET(request: NextRequest) {
     }
 
     let orders = (data ?? []) as any[];
-
-    if (filter === 'available' && auth.role !== 'seller' && auth.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
 
     // Fetch offer details for all orders
     const offerIds = [...new Set(orders.map((o: any) => o.offer_id).filter(Boolean))];
@@ -202,8 +212,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Only customers can create orders' }, { status: 403 });
     }
 
-    // Use regular client for customers (RLS will handle access control)
-    const db = supabase;
+    // Use the service-role client to bypass RLS (custom JWT auth means
+    // auth.uid() is null in Supabase policies; authorization is enforced by
+    // verifying the token above and only allowing customers to create orders).
+    const db = supabaseAdmin ?? supabase;
 
     const body = await request.json();
     const { game_id, offer_id, exclusive_offer_id, account_id, quantity } = createOrderSchema.parse(body);
