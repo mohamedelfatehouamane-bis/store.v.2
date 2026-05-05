@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/lib/language-context';
+import { ORDER_STATUS, normalizeStatus } from '@/lib/order-status';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,15 +22,19 @@ type OrderItem = {
 };
 
 function getStatusColor(status: string) {
-  switch (status.toLowerCase()) {
-    case 'pending':
+  switch (normalizeStatus(status)) {
+    case ORDER_STATUS.PENDING:
       return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-    case 'in_progress':
+    case ORDER_STATUS.IN_PROGRESS:
       return 'bg-blue-50 text-blue-700 border-blue-200';
-    case 'completed':
+    case ORDER_STATUS.DELIVERED:
+      return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+    case ORDER_STATUS.COMPLETED:
       return 'bg-green-50 text-green-700 border-green-200';
-    case 'cancelled':
+    case ORDER_STATUS.CANCELLED:
       return 'bg-red-50 text-red-700 border-red-200';
+    case ORDER_STATUS.DISPUTED:
+      return 'bg-orange-50 text-orange-700 border-orange-200';
     default:
       return 'bg-slate-50 text-slate-700 border-slate-200';
   }
@@ -76,7 +81,9 @@ export default function OrdersPage() {
         }
 
         const data = await response.json();
-        setOrders(data.orders ?? []);
+        const raw: OrderItem[] = data.orders ?? [];
+        console.log('Statuses:', raw.map((o) => o.status));
+        setOrders(raw.map((o) => ({ ...o, status: normalizeStatus(o.status) })));
       } catch (err) {
         console.error(err);
         setError(err instanceof Error ? err.message : 'Failed to fetch orders');
@@ -93,13 +100,15 @@ export default function OrdersPage() {
   );
 
   const progressWidth = (status: string) => {
-    switch (status) {
-      case 'completed':
+    switch (normalizeStatus(status)) {
+      case ORDER_STATUS.COMPLETED:
+      case ORDER_STATUS.AUTO_RELEASED:
         return '100%';
-      case 'in_progress':
+      case ORDER_STATUS.DELIVERED:
+        return '80%';
+      case ORDER_STATUS.IN_PROGRESS:
         return '60%';
-      case 'open':
-      case 'pending':
+      case ORDER_STATUS.PENDING:
         return '20%';
       default:
         return '0%';

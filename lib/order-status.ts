@@ -36,7 +36,14 @@ export const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
  * Normalize a raw status string coming from the API to a guaranteed lowercase
  * `OrderStatus` value.  Pass-through is safe: if the value is already correct
  * nothing changes.
+ *
+ * Legacy DB values are mapped to their canonical client-facing equivalents:
+ *   'open'     → 'pending'
+ *   'accepted' → 'in_progress'
  */
 export function normalizeStatus(raw: string): string {
-  return raw.toLowerCase();
+  const s = raw?.toLowerCase();
+  if (s === 'open') return ORDER_STATUS.PENDING;
+  if (s === 'accepted') return ORDER_STATUS.IN_PROGRESS;
+  return s;
 }

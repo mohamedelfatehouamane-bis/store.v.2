@@ -79,7 +79,9 @@ export default function DashboardHome() {
           const ordersData = await ordersRes.json();
           const orders = ordersData.orders ?? [];
 
-          const revenue = orders.reduce(
+          console.log('Statuses:', orders.map((o: any) => o.status));
+          const completedOrdersAdmin = orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED);
+          const revenue = completedOrdersAdmin.reduce(
             (sum: number, order: any) => sum + Number(order.points_price || 0),
             0
           );
@@ -87,10 +89,9 @@ export default function DashboardHome() {
           setStats({
             totalPoints: 0,
             activeTasks: orders.filter((order: any) =>
-              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status.toLowerCase())
+              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS, ORDER_STATUS.DELIVERED].includes(order.status.toLowerCase())
             ).length,
-            completedOrders: orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED)
-              .length,
+            completedOrders: completedOrdersAdmin.length,
             totalUsers: Array.isArray(usersData.users) ? usersData.users.length : 0,
             revenue,
           });
@@ -121,7 +122,9 @@ export default function DashboardHome() {
           const availableOrders = availableData.orders ?? [];
           const myTasks = sellerData.orders ?? [];
 
-          const revenue = myTasks.reduce(
+          console.log('Statuses:', [...availableOrders, ...myTasks].map((o: any) => o.status));
+          const completedTasks = myTasks.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED);
+          const revenue = completedTasks.reduce(
             (sum: number, order: any) => sum + Number(order.points_price || 0),
             0
           );
@@ -130,7 +133,7 @@ export default function DashboardHome() {
           setStats({
             totalPoints: Number(profileData.user?.total_points ?? 0),
             activeTasks: availableOrders.length,
-            completedOrders: myTasks.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED).length,
+            completedOrders: completedTasks.length,
             totalUsers: 0,
             revenue,
           });
@@ -156,15 +159,17 @@ export default function DashboardHome() {
           const ordersData = await ordersRes.json();
           const orders = ordersData.orders ?? [];
 
+          console.log('Statuses:', orders.map((o: any) => o.status));
+          const completedCustomerOrders = orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED);
           setProfile(profileData.user ?? null);
           setStats({
             totalPoints: Number(profileData.user?.total_points ?? 0),
             activeTasks: orders.filter((order: any) =>
-              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status.toLowerCase())
+              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS, ORDER_STATUS.DELIVERED].includes(order.status.toLowerCase())
             ).length,
-            completedOrders: orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED).length,
+            completedOrders: completedCustomerOrders.length,
             totalUsers: 0,
-            revenue: orders.reduce(
+            revenue: completedCustomerOrders.reduce(
               (sum: number, order: any) => sum + Number(order.points_price || 0),
               0
             ),
