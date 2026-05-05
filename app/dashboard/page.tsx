@@ -86,7 +86,7 @@ export default function DashboardHome() {
           setStats({
             totalPoints: 0,
             activeTasks: orders.filter((order: any) =>
-              ['open', 'in_progress'].includes(order.status)
+              ['pending', 'in_progress'].includes(order.status)
             ).length,
             completedOrders: orders.filter((order: any) => order.status === 'completed')
               .length,
@@ -159,7 +159,7 @@ export default function DashboardHome() {
           setStats({
             totalPoints: Number(profileData.user?.total_points ?? 0),
             activeTasks: orders.filter((order: any) =>
-              ['open', 'in_progress'].includes(order.status)
+              ['pending', 'in_progress'].includes(order.status)
             ).length,
             completedOrders: orders.filter((order: any) => order.status === 'completed').length,
             totalUsers: 0,
