@@ -3,17 +3,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
 import { useAuth } from '@/lib/auth-context'
-import { ORDER_STATUS, normalizeStatus, type OrderStatus } from '@/lib/order-status'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useSocketConnection } from '@/hooks/useSocketConnection'
 import { Loader2 } from 'lucide-react'
+import { supabase } from '@/lib/db'
+import { normalizeStatus, ORDER_STATUS } from '@/lib/order-status'
 
 type OrderItem = {
   id: string
-  status: OrderStatus
+  status: string
   product_name?: string
   game_name?: string
   points_price?: number
@@ -21,6 +20,8 @@ type OrderItem = {
   assigned_seller_id?: string | null
   created_at?: string
 }
+
+type OrderStatusFilter = 'all' | 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'disputed'
 
 type OrderActionEvent = {
   orderId: string
@@ -36,31 +37,31 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: 'In Progress',
   completed: 'Completed',
   cancelled: 'Cancelled',
-}
-
-const ACTION_STATUS_UPDATES: Record<string, OrderItem['status']> = {
-  accept_order: 'in_progress',
-  complete_order: 'completed',
-  cancel_order: 'cancelled',
+  disputed: 'Disputed',
 }
 
 function getStatusBadge(status: OrderItem['status']) {
-  switch (status.toLowerCase()) {
+  switch (normalizeStatus(status)) {
     case ORDER_STATUS.PENDING:
       return 'bg-yellow-50 text-yellow-700 border-yellow-200'
     case ORDER_STATUS.IN_PROGRESS:
       return 'bg-blue-50 text-blue-700 border-blue-200'
+    case ORDER_STATUS.DELIVERED:
+      return 'bg-slate-50 text-slate-700 border-slate-200'
     case ORDER_STATUS.COMPLETED:
       return 'bg-emerald-50 text-emerald-700 border-emerald-200'
     case ORDER_STATUS.CANCELLED:
       return 'bg-red-50 text-red-700 border-red-200'
+    case ORDER_STATUS.DISPUTED:
+      return 'bg-amber-50 text-amber-700 border-amber-200'
     default:
       return 'bg-slate-50 text-slate-700 border-slate-200'
   }
 }
 
 function getStatusText(status: OrderItem['status']) {
-  return status.replace('_', ' ').replace(/\b\w/g, (chr) => chr.toUpperCase())
+  const normalized = normalizeStatus(status)
+  return normalized.replace('_', ' ').replace(/\b\w/g, (chr) => chr.toUpperCase())
 }
 
 function formatActionLabel(action: OrderActionEvent) {
@@ -93,11 +94,10 @@ function formatTimestamp(value?: string) {
 
 export default function AdminDashboardPage() {
   const router = useRouter()
-  const connectSocket = useSocketConnection()
   const { user, token, isLoading } = useAuth()
   const [orders, setOrders] = useState<OrderItem[]>([])
   const [actions, setActions] = useState<OrderActionEvent[]>([])
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed' | 'cancelled'>('all')
+  const [statusFilter, setStatusFilter] = useState<OrderStatusFilter>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
@@ -116,80 +116,55 @@ export default function AdminDashboardPage() {
       return
     }
 
-    let disposed = false
-    let socketCleanup: (() => void) | undefined
+    setConnectionStatus('connecting')
 
-    async function initializeSocket() {
-      setConnectionStatus('connecting')
-      const socket = await connectSocket({ path: '/socket.io' })
+    const channel = supabase
+      .channel('orders')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
+          const newOrder = payload.new as any
+          if (!newOrder || !newOrder.id) return
 
-      if (!socket) {
-        if (!disposed) {
-          setConnectionStatus('disconnected')
-        }
-        return
-      }
-
-      if (disposed) {
-        socket.disconnect()
-        return
-      }
-
-      const onConnect = () => {
-        setConnectionStatus('connected')
-        console.debug('[admin socket] connected', socket.id)
-      }
-
-      const onConnectError = (err: Error) => {
-        setConnectionStatus('disconnected')
-        console.error('[admin socket] connect error', err)
-      }
-
-      const onOrderAction = (event: OrderActionEvent) => {
-        setActions((current) => [...current.slice(-9), event])
-
-        setOrders((current) => {
-          const updated = current.map((order) => {
-            if (order.id !== event.orderId) return order
-
-            const nextStatus = ACTION_STATUS_UPDATES[event.action]
-            return nextStatus ? { ...order, status: nextStatus } : order
-          })
-
-          if (current.some((order) => order.id === event.orderId)) {
-            setHighlightedOrderId(event.orderId)
+          const normalizedStatus = normalizeStatus(newOrder.status)
+          const orderUpdate = {
+            ...newOrder,
+            status: normalizedStatus,
           }
 
-          return updated
-        })
-      }
+          setOrders((current) => {
+            const updated = current.map((order) =>
+              order.id === orderUpdate.id ? { ...order, ...orderUpdate } : order
+            )
 
-      const onDisconnect = () => {
-        setConnectionStatus('disconnected')
-        console.debug('[admin socket] disconnected')
-      }
+            if (!current.some((order) => order.id === orderUpdate.id)) {
+              return [orderUpdate, ...current].slice(0, 50)
+            }
 
-      socket.on('connect', onConnect)
-      socket.on('connect_error', onConnectError)
-      socket.on('order_action', onOrderAction)
-      socket.on('disconnect', onDisconnect)
+            setHighlightedOrderId(orderUpdate.id)
+            return updated
+          })
 
-      socketCleanup = () => {
-        socket.off('connect', onConnect)
-        socket.off('connect_error', onConnectError)
-        socket.off('order_action', onOrderAction)
-        socket.off('disconnect', onDisconnect)
-        socket.disconnect()
-      }
-    }
+          setActions((current) => [
+            ...current.slice(-8),
+            {
+              orderId: newOrder.id,
+              action: `status_${normalizedStatus}`,
+              created_at: new Date().toISOString(),
+              username: 'supabase',
+            },
+          ])
+        }
+      )
+      .subscribe()
 
-    void initializeSocket()
+    setConnectionStatus('connected')
 
     return () => {
-      disposed = true
-      socketCleanup?.()
+      supabase.removeChannel(channel)
     }
-  }, [connectSocket, isLoading, router, token, user])
+  }, [isLoading, router, token, user])
 
   useEffect(() => {
     if (!user) return
@@ -213,7 +188,12 @@ export default function AdminDashboardPage() {
         }
 
         const data = await response.json()
-        setOrders(data.orders ?? [])
+        setOrders(
+          (data.orders ?? []).map((order: any) => ({
+            ...order,
+            status: normalizeStatus(order.status),
+          }))
+        )
       } catch (err) {
         console.error(err)
         setError(err instanceof Error ? err.message : 'Failed to load orders')
@@ -240,16 +220,17 @@ export default function AdminDashboardPage() {
       return orders
     }
 
-    return orders.filter((order) => order.status.toLowerCase() === statusFilter)
+    return orders.filter((order) => order.status === statusFilter)
   }, [orders, statusFilter])
 
   const stats = useMemo(
     () => ({
       total: orders.length,
-      pending: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).length,
-      active: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.IN_PROGRESS).length,
-      completed: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED).length,
-      cancelled: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.CANCELLED).length,
+      pending: orders.filter((order) => order.status === ORDER_STATUS.PENDING).length,
+      active: orders.filter((order) => order.status === ORDER_STATUS.IN_PROGRESS).length,
+      completed: orders.filter((order) => order.status === ORDER_STATUS.COMPLETED).length,
+      cancelled: orders.filter((order) => order.status === ORDER_STATUS.CANCELLED).length,
+      disputed: orders.filter((order) => order.status === ORDER_STATUS.DISPUTED).length,
     }),
     [orders]
   )
@@ -282,17 +263,18 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard label="Total Orders" value={stats.total} />
         <StatCard label="Pending" value={stats.pending} tone="yellow" />
         <StatCard label="In Progress" value={stats.active} tone="blue" />
         <StatCard label="Completed" value={stats.completed} tone="green" />
         <StatCard label="Cancelled" value={stats.cancelled} tone="red" />
+        <StatCard label="Disputed" value={stats.disputed} tone="yellow" />
       </div>
 
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-wrap gap-2">
-          {(['all', 'pending', 'in_progress', 'completed', 'cancelled'] as const).map((status) => (
+          {(['all', 'pending', 'in_progress', 'completed', 'cancelled', 'disputed'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
