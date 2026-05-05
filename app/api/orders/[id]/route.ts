@@ -32,9 +32,6 @@ if (!auth) {
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 }
 
-console.log('[GET ORDER] ID:', id, 'USER:', auth.id, 'ROLE:', auth.role)
-
-// 🔥 USE ADMIN CLIENT (FIX)
 const { data: order, error } = await supabaseAdmin
   .from('orders')
   .select('*')
@@ -42,11 +39,9 @@ const { data: order, error } = await supabaseAdmin
   .single()
 
 if (error || !order) {
-  console.log('[GET ORDER] NOT FOUND:', id)
   return NextResponse.json({ error: 'Order not found' }, { status: 404 })
 }
 
-// 🔒 SECURITY CHECK (VERY IMPORTANT)
 const isAuthorized =
   order.customer_id === auth.id ||
   order.assigned_seller_id === auth.id ||
@@ -56,7 +51,6 @@ if (!isAuthorized) {
   return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
 }
 
-// ===== LOAD RELATIONS =====
 const fullOrder: any = { ...order }
 
 if (order.assigned_seller_id) {
@@ -115,6 +109,113 @@ return NextResponse.json({
 
 } catch (err) {
 console.error('[GET ORDER ERROR]', err)
+return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+}
+}
+
+// ================= UPDATE ORDER =================
+export async function PATCH(
+request: NextRequest,
+{ params }: { params: Promise<{ id: string }> }
+) {
+try {
+const { id } = await params
+
+```
+const authHeader = request.headers.get('authorization')
+if (!authHeader?.startsWith('Bearer ')) {
+  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+}
+
+const auth = verifyToken(authHeader.substring(7))
+if (!auth) {
+  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+}
+
+const body = await request.json()
+const { status } = updateOrderSchema.parse(body)
+const normalizedStatus = normalizeStatus(status)
+
+// 🔥 GET ORDER
+const { data: order, error } = await supabaseAdmin
+  .from('orders')
+  .select('*')
+  .eq('id', id)
+  .single()
+
+if (error || !order) {
+  return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+}
+
+const isAuthorized =
+  order.customer_id === auth.id ||
+  order.assigned_seller_id === auth.id ||
+  auth.role === 'admin'
+
+if (!isAuthorized) {
+  return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+}
+
+// 🔥 UPDATE ORDER
+await supabaseAdmin
+  .from('orders')
+  .update({
+    status: normalizedStatus,
+    updated_at: new Date().toISOString(),
+  })
+  .eq('id', id)
+
+// ================= TELEGRAM =================
+
+const { data: customer } = await supabaseAdmin
+  .from('users')
+  .select('telegram_id, username')
+  .eq('id', order.customer_id)
+  .maybeSingle()
+
+const { data: seller } = await supabaseAdmin
+  .from('users')
+  .select('telegram_id')
+  .eq('id', order.assigned_seller_id)
+  .maybeSingle()
+
+const recipients: string[] = []
+
+if (customer?.telegram_id) recipients.push(customer.telegram_id)
+if (seller?.telegram_id) recipients.push(seller.telegram_id)
+
+let message = telegramService.orderUpdatedMessage(
+  String(id),
+  String(normalizedStatus)
+)
+
+// 🔥 CUSTOM MESSAGES
+if (normalizedStatus === ORDER_STATUS.IN_PROGRESS) {
+  message = `📦 Order #${id} picked by seller`
+}
+
+if (normalizedStatus === ORDER_STATUS.COMPLETED) {
+  message = `✅ Order #${id} completed\n💰 Payment released`
+}
+
+if (normalizedStatus === ORDER_STATUS.CANCELLED) {
+  message = `❌ Order #${id} cancelled`
+}
+
+await Promise.allSettled(
+  recipients.map(chatId =>
+    telegramService.sendMessage(chatId, message)
+  )
+)
+
+return NextResponse.json({
+  success: true,
+  message: 'Order updated successfully',
+})
+```
+
+} catch (err) {
+console.error('[UPDATE ORDER ERROR]', err)
 return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 }
 }
