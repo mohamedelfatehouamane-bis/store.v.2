@@ -4,8 +4,8 @@ import { KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState 
 import { useParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { useLanguage } from '@/lib/language-context'
+import { normalizeStatus, ORDER_STATUS, isActiveOrderStatus, type OrderStatusValue } from '@/lib/order-status'
 import type { TranslationKey } from '@/lib/translations'
-import { ORDER_STATUS, ACTIVE_ORDER_STATUSES } from '@/lib/order-status'
 import { ChatMessage, OrderActionEvent, ORDER_ACTIONS, useOrderChat } from '@/hooks/use-order-chat'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,7 +31,7 @@ type FetchOrderOptions = {
   silent?: boolean
 }
 
-const ACTIVE_STATUSES = new Set(ACTIVE_ORDER_STATUSES)
+const ACTIVE_STATUSES = new Set([ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS, ORDER_STATUS.DELIVERED])
 
 const formatDate = (value?: string | null) => {
   if (!value) return '-'
@@ -68,6 +68,8 @@ const OrderHeader = memo(function OrderHeader({
   status: string
   createdAt?: string | null
 }) {
+  const normalizedStatus = normalizeStatus(status)
+
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -77,9 +79,9 @@ const OrderHeader = memo(function OrderHeader({
       <div className="flex flex-col gap-2 sm:items-end">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-slate-100 px-3 py-1 text-sm uppercase tracking-wide text-slate-700">
-            {getStatusLabel(status)}
+            {getStatusLabel(normalizedStatus)}
           </span>
-          {status === 'disputed' && (
+          {normalizedStatus === ORDER_STATUS.DISPUTED && (
             <Badge variant="destructive">Disputed</Badge>
           )}
         </div>
@@ -152,7 +154,7 @@ const OrderStatus = memo(function OrderStatus({
             </div>
             <div className="flex items-center justify-between text-sm text-slate-600">
               <span>Order status</span>
-              <span>{getStatusLabel(order.status)}</span>
+              <span>{getStatusLabel(normalizeStatus(order.status))}</span>
             </div>
             <div className="flex items-center justify-between text-sm text-slate-600">
               <span>Order amount</span>
@@ -177,7 +179,7 @@ const OrderStatus = memo(function OrderStatus({
         </CardHeader>
         <CardContent>
           <OrderTimeline
-            status={order.status}
+            status={normalizeStatus(order.status)}
             deliveredAt={order.delivered_at}
             confirmedAt={order.confirmed_at}
             completedAt={order.completed_at}
@@ -264,16 +266,20 @@ const OrderActions = memo(function OrderActions({
   const [disputeReason, setDisputeReason] = useState('')
   const [disputeDialogError, setDisputeDialogError] = useState('')
 
+  const normalizedOrderStatus = normalizeStatus(order.status) as OrderStatusValue
+
   const canCancelOrder =
-    order.status !== ORDER_STATUS.COMPLETED &&
-    order.status !== ORDER_STATUS.CANCELLED &&
-    order.status !== ORDER_STATUS.DISPUTED &&
+    normalizedOrderStatus !== ORDER_STATUS.COMPLETED &&
+    normalizedOrderStatus !== ORDER_STATUS.CANCELLED &&
+    normalizedOrderStatus !== ORDER_STATUS.DISPUTED &&
     (isAdmin ||
-      (isCustomer && order.status === ORDER_STATUS.PENDING) ||
-      (isSeller && [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status)))
+      (isCustomer && normalizedOrderStatus === ORDER_STATUS.PENDING) ||
+      (isSeller && (normalizedOrderStatus === ORDER_STATUS.PENDING || normalizedOrderStatus === ORDER_STATUS.IN_PROGRESS)))
 
   const canReportDispute =
-    ![ORDER_STATUS.COMPLETED, ORDER_STATUS.CANCELLED, ORDER_STATUS.DISPUTED].includes(order.status) &&
+    normalizedOrderStatus !== ORDER_STATUS.COMPLETED &&
+    normalizedOrderStatus !== ORDER_STATUS.CANCELLED &&
+    normalizedOrderStatus !== ORDER_STATUS.DISPUTED &&
     (isSeller || isCustomer)
 
   const cancelReason =
@@ -414,20 +420,20 @@ const OrderActions = memo(function OrderActions({
           )}
 
           <div className="grid gap-3 sm:grid-cols-2">
-            {order.status === 'disputed' && (
+            {normalizedOrderStatus === ORDER_STATUS.DISPUTED && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                 This order is currently disputed. Order actions are locked until an administrator resolves the dispute.
               </div>
             )}
 
-            {isSeller && [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status) && !order.delivered_at && (
-              <Button onClick={onMarkDelivered} disabled={actionLoading || order.status === 'disputed'} className="w-full">
+            {isSeller && (normalizedOrderStatus === ORDER_STATUS.PENDING || normalizedOrderStatus === ORDER_STATUS.IN_PROGRESS) && !order.delivered_at && (
+              <Button onClick={onMarkDelivered} disabled={actionLoading} className="w-full">
                 {actionLoading ? t('markingDelivered') : t('markDelivered')}
               </Button>
             )}
 
             {isCustomer && order.delivered_at && !order.confirmed_at && (
-              <Button variant="secondary" onClick={onConfirmDelivery} disabled={actionLoading || order.status === 'disputed'} className="w-full">
+              <Button variant="secondary" onClick={onConfirmDelivery} disabled={actionLoading || normalizedOrderStatus === ORDER_STATUS.DISPUTED} className="w-full">
                 {actionLoading ? t('confirming') : t('confirmDelivery')}
               </Button>
             )}
@@ -547,7 +553,7 @@ const OrderActions = memo(function OrderActions({
         </CardContent>
       </Card>
 
-      {isCustomer && order.status === 'completed' && (
+      {isCustomer && normalizedOrderStatus === ORDER_STATUS.COMPLETED && (
         <Card>
           <CardHeader>
             <CardTitle>Order review</CardTitle>
@@ -733,7 +739,7 @@ const OrderMessages = memo(function OrderMessages({
               )}
             </div>
 
-            {!connected && socketStatus !== 'disconnected' && (
+            {!connected && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
                 Connecting to chat server...
               </div>
@@ -981,7 +987,7 @@ export default function OrderDetailsPage() {
     lastOrderActionKeyRef.current = actionKey
     const description = getOrderActionMessage(latestAction)
     toast.success(description)
-    setOrder((previous) => applyOrderActionToOrder(latestAction, previous))
+    setOrder((previous: any) => applyOrderActionToOrder(latestAction, previous))
 
     if (refreshOrderTimeoutRef.current) {
       window.clearTimeout(refreshOrderTimeoutRef.current)
@@ -1066,7 +1072,7 @@ export default function OrderDetailsPage() {
       await fetchOrder({ silent: true })
     }
 
-    const pollDelay = ACTIVE_STATUSES.has(order?.status) ? 15000 : 60000
+    const pollDelay = isActiveOrderStatus(order?.status) ? 15000 : 60000
     const interval = window.setInterval(pollOrder, pollDelay)
     const onFocus = () => {
       void fetchOrder({ silent: true })
