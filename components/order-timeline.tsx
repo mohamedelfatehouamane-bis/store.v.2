@@ -1,8 +1,9 @@
 'use client'
 
 import { AlertTriangle, CheckCircle2, Circle, Clock } from 'lucide-react'
+import { ORDER_STATUS } from '@/lib/order-status'
 
-type OrderStatus = 'open' | 'in_progress' | 'delivered' | 'completed' | 'auto_released' | 'cancelled' | 'disputed'
+type OrderStatus = 'pending' | 'in_progress' | 'delivered' | 'completed' | 'auto_released' | 'cancelled' | 'disputed'
 
 interface OrderTimelineProps {
   status: OrderStatus
@@ -19,52 +20,53 @@ export function OrderTimeline({
   completedAt,
   autoReleaseAt,
 }: OrderTimelineProps) {
+  const normalizedStatus = status.toLowerCase() as OrderStatus
   const steps = [
     {
-      id: 'open',
+      id: ORDER_STATUS.PENDING,
       label: 'Order placed',
       description: 'Waiting for seller',
-      icon: 'open',
-      completed: status !== 'open',
+      icon: ORDER_STATUS.PENDING,
+      completed: normalizedStatus !== ORDER_STATUS.PENDING,
     },
     {
-      id: 'in_progress',
+      id: ORDER_STATUS.IN_PROGRESS,
       label: 'In progress',
       description: 'Seller is working on it',
-      icon: 'in_progress',
-      completed: ['delivered', 'completed', 'auto_released', 'confirmed', 'disputed'].includes(status),
+      icon: ORDER_STATUS.IN_PROGRESS,
+      completed: ['delivered', 'completed', 'auto_released', 'confirmed', 'disputed'].includes(normalizedStatus),
     },
     {
-      id: 'delivered',
+      id: ORDER_STATUS.DELIVERED,
       label: 'Delivered',
       description: 'Waiting for confirmation',
-      icon: 'delivered',
-      completed: ['completed', 'confirmed', 'auto_released', 'disputed'].includes(status),
+      icon: ORDER_STATUS.DELIVERED,
+      completed: ['completed', 'confirmed', 'auto_released', 'disputed'].includes(normalizedStatus),
       timestamp: deliveredAt,
     },
     {
-      id: 'disputed',
+      id: ORDER_STATUS.DISPUTED,
       label: 'Disputed',
       description: 'Under review by admin',
-      icon: 'disputed',
-      completed: ['completed', 'auto_released'].includes(status),
+      icon: ORDER_STATUS.DISPUTED,
+      completed: ['completed', 'auto_released'].includes(normalizedStatus),
     },
     {
-      id: 'completed',
+      id: ORDER_STATUS.COMPLETED,
       label: 'Completed',
       description: 'Order finished',
-      icon: 'completed',
-      completed: ['completed', 'auto_released'].includes(status),
+      icon: ORDER_STATUS.COMPLETED,
+      completed: ['completed', 'auto_released'].includes(normalizedStatus),
       timestamp: confirmedAt || completedAt,
     },
   ]
 
   const currentStepIndex = steps.findIndex((s) => {
-    if (status === 'open') return s.id === 'open'
-    if (status === 'in_progress') return s.id === 'in_progress'
-    if (status === 'delivered') return s.id === 'delivered'
-    if (status === 'disputed') return s.id === 'disputed'
-    if (['completed', 'auto_released', 'confirmed'].includes(status)) return s.id === 'completed'
+    if (normalizedStatus === ORDER_STATUS.PENDING) return s.id === ORDER_STATUS.PENDING
+    if (normalizedStatus === ORDER_STATUS.IN_PROGRESS) return s.id === ORDER_STATUS.IN_PROGRESS
+    if (normalizedStatus === ORDER_STATUS.DELIVERED) return s.id === ORDER_STATUS.DELIVERED
+    if (normalizedStatus === ORDER_STATUS.DISPUTED) return s.id === ORDER_STATUS.DISPUTED
+    if ([ORDER_STATUS.COMPLETED, ORDER_STATUS.AUTO_RELEASED, 'confirmed'].includes(normalizedStatus)) return s.id === ORDER_STATUS.COMPLETED
     return -1
   })
 

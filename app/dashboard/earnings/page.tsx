@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { ORDER_STATUS } from '@/lib/order-status';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
@@ -199,7 +200,7 @@ export default function EarningsPage() {
   }
 
   const approvedOrders = useMemo(
-    () => orders.filter((order) => order.status === 'approved'),
+    () => orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED),
     [orders]
   );
 
@@ -215,7 +216,7 @@ export default function EarningsPage() {
       return {
         month: label,
         earned: monthOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0),
-        pending: monthOrders.filter((order) => order.status === 'open').reduce((sum, order) => sum + Number(order.points_price || 0), 0),
+        pending: monthOrders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).reduce((sum, order) => sum + Number(order.points_price || 0), 0),
         released: monthOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0),
       };
     });
@@ -243,7 +244,7 @@ export default function EarningsPage() {
 
   const totalEarned = approvedOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0);
   const totalReleased = approvedOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0);
-  const pendingAmount = orders.filter((order) => order.status === 'open').reduce((sum, order) => sum + Number(order.points_price || 0), 0);
+  const pendingAmount = orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).reduce((sum, order) => sum + Number(order.points_price || 0), 0);
 
   const recentTransactions = orders.slice(0, 4).map((order) => ({
     id: order.id,
@@ -254,10 +255,10 @@ export default function EarningsPage() {
   }));
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'open':
+    switch (status.toLowerCase()) {
+      case ORDER_STATUS.PENDING:
         return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-      case 'completed':
+      case ORDER_STATUS.COMPLETED:
         return 'bg-green-50 text-green-700 border-green-200';
       default:
         return 'bg-slate-50 text-slate-700 border-slate-200';

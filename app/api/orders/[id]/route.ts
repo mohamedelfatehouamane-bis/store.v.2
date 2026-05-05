@@ -17,6 +17,8 @@ const updateOrderSchema = z.object({
 function normalizeOrderStatus(status: string) {
   // Backward compatibility: older callback handlers used "accepted".
   if (status === 'accepted') return 'in_progress'
+  // DB stores newly created orders as "open"; all client-facing APIs use "pending".
+  if (status === 'open') return 'pending'
   return status
 }
 

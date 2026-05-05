@@ -24,7 +24,7 @@ type ProfileData = {
 };
 
 function getStatusColor(status: string) {
-  switch (status) {
+  switch (status.toLowerCase()) {
     case 'pending':
       return 'bg-yellow-100 text-yellow-800';
     case 'in_progress':
@@ -33,8 +33,6 @@ function getStatusColor(status: string) {
       return 'bg-green-100 text-green-800';
     case 'cancelled':
       return 'bg-red-100 text-red-800';
-    case 'open':
-      return 'bg-slate-100 text-slate-800';
     default:
       return 'bg-slate-100 text-slate-800';
   }

@@ -21,7 +21,7 @@ type OrderItem = {
 };
 
 function getStatusColor(status: string) {
-  switch (status) {
+  switch (status.toLowerCase()) {
     case 'pending':
       return 'bg-yellow-50 text-yellow-700 border-yellow-200';
     case 'in_progress':
@@ -30,8 +30,6 @@ function getStatusColor(status: string) {
       return 'bg-green-50 text-green-700 border-green-200';
     case 'cancelled':
       return 'bg-red-50 text-red-700 border-red-200';
-    case 'open':
-      return 'bg-slate-50 text-slate-700 border-slate-200';
     default:
       return 'bg-slate-50 text-slate-700 border-slate-200';
   }

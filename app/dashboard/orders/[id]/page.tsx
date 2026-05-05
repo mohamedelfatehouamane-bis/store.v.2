@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { useLanguage } from '@/lib/language-context'
 import type { TranslationKey } from '@/lib/translations'
+import { ORDER_STATUS, ACTIVE_ORDER_STATUSES } from '@/lib/order-status'
 import { ChatMessage, OrderActionEvent, ORDER_ACTIONS, useOrderChat } from '@/hooks/use-order-chat'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,7 +31,7 @@ type FetchOrderOptions = {
   silent?: boolean
 }
 
-const ACTIVE_STATUSES = new Set(['open', 'in_progress', 'delivered'])
+const ACTIVE_STATUSES = new Set(ACTIVE_ORDER_STATUSES)
 
 const formatDate = (value?: string | null) => {
   if (!value) return '-'
@@ -264,15 +265,15 @@ const OrderActions = memo(function OrderActions({
   const [disputeDialogError, setDisputeDialogError] = useState('')
 
   const canCancelOrder =
-    order.status !== 'completed' &&
-    order.status !== 'cancelled' &&
-    order.status !== 'disputed' &&
+    order.status !== ORDER_STATUS.COMPLETED &&
+    order.status !== ORDER_STATUS.CANCELLED &&
+    order.status !== ORDER_STATUS.DISPUTED &&
     (isAdmin ||
-      (isCustomer && order.status === 'open') ||
-      (isSeller && ['open', 'accepted', 'in_progress'].includes(order.status)))
+      (isCustomer && order.status === ORDER_STATUS.PENDING) ||
+      (isSeller && [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status)))
 
   const canReportDispute =
-    !['completed', 'cancelled', 'disputed'].includes(order.status) &&
+    ![ORDER_STATUS.COMPLETED, ORDER_STATUS.CANCELLED, ORDER_STATUS.DISPUTED].includes(order.status) &&
     (isSeller || isCustomer)
 
   const cancelReason =
@@ -419,7 +420,7 @@ const OrderActions = memo(function OrderActions({
               </div>
             )}
 
-            {isSeller && ['open', 'accepted', 'in_progress'].includes(order.status) && !order.delivered_at && (
+            {isSeller && [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status) && !order.delivered_at && (
               <Button onClick={onMarkDelivered} disabled={actionLoading || order.status === 'disputed'} className="w-full">
                 {actionLoading ? t('markingDelivered') : t('markDelivered')}
               </Button>
