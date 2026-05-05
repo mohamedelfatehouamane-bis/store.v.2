@@ -1,12 +1,20 @@
 'use client'
 
 import { AlertTriangle, CheckCircle2, Circle, Clock } from 'lucide-react'
-import { ORDER_STATUS } from '@/lib/order-status'
+import { normalizeStatus, ORDER_STATUS } from '@/lib/order-status'
 
-type OrderStatus = 'pending' | 'in_progress' | 'delivered' | 'completed' | 'auto_released' | 'cancelled' | 'disputed'
+type OrderStatus =
+  | 'open'
+  | 'pending'
+  | 'in_progress'
+  | 'delivered'
+  | 'completed'
+  | 'auto_released'
+  | 'cancelled'
+  | 'disputed'
 
 interface OrderTimelineProps {
-  status: OrderStatus
+  status: string
   deliveredAt?: string
   confirmedAt?: string
   completedAt?: string
@@ -20,27 +28,28 @@ export function OrderTimeline({
   completedAt,
   autoReleaseAt,
 }: OrderTimelineProps) {
-  const normalizedStatus = status.toLowerCase() as OrderStatus
+  const normalizedStatus = normalizeStatus(status)
+
   const steps = [
     {
       id: ORDER_STATUS.PENDING,
       label: 'Order placed',
       description: 'Waiting for seller',
-      icon: ORDER_STATUS.PENDING,
+      icon: 'open',
       completed: normalizedStatus !== ORDER_STATUS.PENDING,
     },
     {
       id: ORDER_STATUS.IN_PROGRESS,
       label: 'In progress',
       description: 'Seller is working on it',
-      icon: ORDER_STATUS.IN_PROGRESS,
+      icon: 'in_progress',
       completed: ['delivered', 'completed', 'auto_released', 'confirmed', 'disputed'].includes(normalizedStatus),
     },
     {
       id: ORDER_STATUS.DELIVERED,
       label: 'Delivered',
       description: 'Waiting for confirmation',
-      icon: ORDER_STATUS.DELIVERED,
+      icon: 'delivered',
       completed: ['completed', 'confirmed', 'auto_released', 'disputed'].includes(normalizedStatus),
       timestamp: deliveredAt,
     },
@@ -48,14 +57,14 @@ export function OrderTimeline({
       id: ORDER_STATUS.DISPUTED,
       label: 'Disputed',
       description: 'Under review by admin',
-      icon: ORDER_STATUS.DISPUTED,
+      icon: 'disputed',
       completed: ['completed', 'auto_released'].includes(normalizedStatus),
     },
     {
       id: ORDER_STATUS.COMPLETED,
       label: 'Completed',
       description: 'Order finished',
-      icon: ORDER_STATUS.COMPLETED,
+      icon: 'completed',
       completed: ['completed', 'auto_released'].includes(normalizedStatus),
       timestamp: confirmedAt || completedAt,
     },
@@ -66,7 +75,7 @@ export function OrderTimeline({
     if (normalizedStatus === ORDER_STATUS.IN_PROGRESS) return s.id === ORDER_STATUS.IN_PROGRESS
     if (normalizedStatus === ORDER_STATUS.DELIVERED) return s.id === ORDER_STATUS.DELIVERED
     if (normalizedStatus === ORDER_STATUS.DISPUTED) return s.id === ORDER_STATUS.DISPUTED
-    if ([ORDER_STATUS.COMPLETED, ORDER_STATUS.AUTO_RELEASED, 'confirmed'].includes(normalizedStatus)) return s.id === ORDER_STATUS.COMPLETED
+    if (['completed', 'auto_released', 'confirmed'].includes(normalizedStatus)) return s.id === ORDER_STATUS.COMPLETED
     return -1
   })
 
