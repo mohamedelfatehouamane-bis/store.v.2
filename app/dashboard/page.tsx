@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { ORDER_STATUS } from '@/lib/order-status';
+import { normalizeStatus, ORDER_STATUS, isActiveOrderStatus } from '@/lib/order-status';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -77,21 +77,22 @@ export default function DashboardHome() {
 
           const usersData = await usersRes.json();
           const ordersData = await ordersRes.json();
-          const orders = ordersData.orders ?? [];
+          const orders = (ordersData.orders ?? []).map((order: any) => ({
+            ...order,
+            status: normalizeStatus(order.status),
+          }));
 
-          console.log('Statuses:', orders.map((o: any) => o.status));
-          const completedOrdersAdmin = orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED);
-          const revenue = completedOrdersAdmin.reduce(
-            (sum: number, order: any) => sum + Number(order.points_price || 0),
-            0
-          );
+          console.log('Statuses:', orders.map((order) => order.status));
+
+          const revenue = orders
+            .filter((order: any) => order.status === ORDER_STATUS.COMPLETED)
+            .reduce((sum: number, order: any) => sum + Number(order.points_price || 0), 0);
 
           setStats({
             totalPoints: 0,
-            activeTasks: orders.filter((order: any) =>
-              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS, ORDER_STATUS.DELIVERED].includes(order.status.toLowerCase())
-            ).length,
-            completedOrders: completedOrdersAdmin.length,
+            activeTasks: orders.filter((order: any) => isActiveOrderStatus(order.status)).length,
+            completedOrders: orders.filter((order: any) => order.status === ORDER_STATUS.COMPLETED)
+              .length,
             totalUsers: Array.isArray(usersData.users) ? usersData.users.length : 0,
             revenue,
           });
@@ -119,21 +120,24 @@ export default function DashboardHome() {
           const profileData = await profileRes.json();
           const availableData = await availableRes.json();
           const sellerData = await sellerRes.json();
-          const availableOrders = availableData.orders ?? [];
-          const myTasks = sellerData.orders ?? [];
+          const availableOrders = (availableData.orders ?? []).map((order: any) => ({
+            ...order,
+            status: normalizeStatus(order.status),
+          }));
+          const myTasks = (sellerData.orders ?? []).map((order: any) => ({
+            ...order,
+            status: normalizeStatus(order.status),
+          }));
 
-          console.log('Statuses:', [...availableOrders, ...myTasks].map((o: any) => o.status));
-          const completedTasks = myTasks.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED);
-          const revenue = completedTasks.reduce(
-            (sum: number, order: any) => sum + Number(order.points_price || 0),
-            0
-          );
+          const revenue = myTasks
+            .filter((order: any) => order.status === ORDER_STATUS.COMPLETED)
+            .reduce((sum: number, order: any) => sum + Number(order.points_price || 0), 0);
 
           setProfile(profileData.user ?? null);
           setStats({
             totalPoints: Number(profileData.user?.total_points ?? 0),
             activeTasks: availableOrders.length,
-            completedOrders: completedTasks.length,
+            completedOrders: myTasks.filter((order: any) => order.status === ORDER_STATUS.COMPLETED).length,
             totalUsers: 0,
             revenue,
           });
@@ -157,22 +161,22 @@ export default function DashboardHome() {
 
           const profileData = await profileRes.json();
           const ordersData = await ordersRes.json();
-          const orders = ordersData.orders ?? [];
+          const orders = (ordersData.orders ?? []).map((order: any) => ({
+            ...order,
+            status: normalizeStatus(order.status),
+          }));
 
-          console.log('Statuses:', orders.map((o: any) => o.status));
-          const completedCustomerOrders = orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED);
+          const completedRevenue = orders
+            .filter((order: any) => order.status === ORDER_STATUS.COMPLETED)
+            .reduce((sum: number, order: any) => sum + Number(order.points_price || 0), 0);
+
           setProfile(profileData.user ?? null);
           setStats({
             totalPoints: Number(profileData.user?.total_points ?? 0),
-            activeTasks: orders.filter((order: any) =>
-              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS, ORDER_STATUS.DELIVERED].includes(order.status.toLowerCase())
-            ).length,
-            completedOrders: completedCustomerOrders.length,
+            activeTasks: orders.filter((order: any) => isActiveOrderStatus(order.status)).length,
+            completedOrders: orders.filter((order: any) => order.status === ORDER_STATUS.COMPLETED).length,
             totalUsers: 0,
-            revenue: completedCustomerOrders.reduce(
-              (sum: number, order: any) => sum + Number(order.points_price || 0),
-              0
-            ),
+            revenue: completedRevenue,
           });
           setRecentOrders(orders.slice(0, 3));
         }
