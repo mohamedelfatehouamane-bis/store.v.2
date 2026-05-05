@@ -151,7 +151,7 @@ export default function AnalyticsPage() {
   }, [isAdmin]);
 
   const approvedOrders = useMemo(
-    () => orders.filter((order) => order.status === 'approved'),
+    () => orders.filter((order) => order.status === 'completed'),
     [orders]
   );
 
@@ -176,7 +176,7 @@ export default function AnalyticsPage() {
     return [
       { status: 'Completed', count: counts.completed || 0, percentage: Math.round(((counts.completed || 0) / total) * 100), color: 'bg-green-500' },
       { status: 'In Progress', count: counts.in_progress || 0, percentage: Math.round(((counts.in_progress || 0) / total) * 100), color: 'bg-blue-500' },
-      { status: 'Open', count: counts.open || 0, percentage: Math.round(((counts.open || 0) / total) * 100), color: 'bg-yellow-500' },
+      { status: 'Open', count: counts.pending || 0, percentage: Math.round(((counts.pending || 0) / total) * 100), color: 'bg-yellow-500' },
       { status: 'Cancelled', count: counts.cancelled || 0, percentage: Math.round(((counts.cancelled || 0) / total) * 100), color: 'bg-red-500' },
     ];
   }, [orders]);
