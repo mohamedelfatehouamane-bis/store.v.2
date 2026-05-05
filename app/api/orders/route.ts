@@ -1,4 +1,70 @@
-import { NextRequest, NextResponse } from 'next/server';
+export async function GET(request: NextRequest) {
+  try {
+    const auth = getAuthFromRequest(request);
+
+    if (!auth) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const filter = searchParams.get('filter') || 'all';
+    const rawStatus = searchParams.get('status');
+
+    // ✅ ALWAYS use admin client to bypass RLS safely
+    const dbClient = supabaseAdmin ?? supabase;
+
+    let query = dbClient
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    // ✅ FIXED FILTERING
+    if (filter === 'my-orders') {
+      query = query.eq('customer_id', auth.id);
+    }
+
+    else if (filter === 'my-tasks') {
+      query = query.eq('assigned_seller_id', auth.id);
+    }
+
+    else if (filter === 'available') {
+      query = query
+        .is('assigned_seller_id', null)
+        .in('status', ['open', 'pending']);
+    }
+
+    // ✅ FIXED STATUS FILTER
+    if (rawStatus && rawStatus !== 'all') {
+      const statusFilters = resolveDbStatusFilters(rawStatus);
+      query = query.in('status', statusFilters);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Get orders error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // ✅ NORMALIZE EVERYTHING
+    const normalizedOrders = (data ?? []).map((order) => ({
+      ...order,
+      status: normalizeStatus(order.status),
+    }));
+
+    return NextResponse.json({
+      success: true,
+      orders: normalizedOrders,
+    });
+
+  } catch (error) {
+    console.error('Get orders error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}import { NextRequest, NextResponse } from 'next/server';
 import { supabase, supabaseAdmin } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 import { telegramService } from '@/lib/telegram-service';
