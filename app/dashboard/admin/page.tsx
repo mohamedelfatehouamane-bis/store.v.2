@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { ORDER_STATUS, type OrderStatus } from '@/lib/order-status'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSocketConnection } from '@/hooks/useSocketConnection'
@@ -11,7 +12,7 @@ import { Loader2 } from 'lucide-react'
 
 type OrderItem = {
   id: string
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'open'
+  status: OrderStatus
   product_name?: string
   game_name?: string
   points_price?: number
@@ -43,17 +44,15 @@ const ACTION_STATUS_UPDATES: Record<string, OrderItem['status']> = {
 }
 
 function getStatusBadge(status: OrderItem['status']) {
-  switch (status) {
-    case 'pending':
+  switch (status.toLowerCase()) {
+    case ORDER_STATUS.PENDING:
       return 'bg-yellow-50 text-yellow-700 border-yellow-200'
-    case 'in_progress':
+    case ORDER_STATUS.IN_PROGRESS:
       return 'bg-blue-50 text-blue-700 border-blue-200'
-    case 'completed':
+    case ORDER_STATUS.COMPLETED:
       return 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    case 'cancelled':
+    case ORDER_STATUS.CANCELLED:
       return 'bg-red-50 text-red-700 border-red-200'
-    case 'open':
-      return 'bg-slate-50 text-slate-700 border-slate-200'
     default:
       return 'bg-slate-50 text-slate-700 border-slate-200'
   }
@@ -240,16 +239,16 @@ export default function AdminDashboardPage() {
       return orders
     }
 
-    return orders.filter((order) => order.status === statusFilter)
+    return orders.filter((order) => order.status.toLowerCase() === statusFilter)
   }, [orders, statusFilter])
 
   const stats = useMemo(
     () => ({
       total: orders.length,
-      pending: orders.filter((order) => order.status === 'pending').length,
-      active: orders.filter((order) => order.status === 'in_progress').length,
-      completed: orders.filter((order) => order.status === 'completed').length,
-      cancelled: orders.filter((order) => order.status === 'cancelled').length,
+      pending: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).length,
+      active: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.IN_PROGRESS).length,
+      completed: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED).length,
+      cancelled: orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.CANCELLED).length,
     }),
     [orders]
   )

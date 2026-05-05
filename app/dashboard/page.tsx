@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { ORDER_STATUS } from '@/lib/order-status';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -86,9 +87,9 @@ export default function DashboardHome() {
           setStats({
             totalPoints: 0,
             activeTasks: orders.filter((order: any) =>
-              ['pending', 'in_progress'].includes(order.status)
+              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status.toLowerCase())
             ).length,
-            completedOrders: orders.filter((order: any) => order.status === 'completed')
+            completedOrders: orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED)
               .length,
             totalUsers: Array.isArray(usersData.users) ? usersData.users.length : 0,
             revenue,
@@ -129,7 +130,7 @@ export default function DashboardHome() {
           setStats({
             totalPoints: Number(profileData.user?.total_points ?? 0),
             activeTasks: availableOrders.length,
-            completedOrders: myTasks.filter((order: any) => order.status === 'completed').length,
+            completedOrders: myTasks.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED).length,
             totalUsers: 0,
             revenue,
           });
@@ -159,9 +160,9 @@ export default function DashboardHome() {
           setStats({
             totalPoints: Number(profileData.user?.total_points ?? 0),
             activeTasks: orders.filter((order: any) =>
-              ['pending', 'in_progress'].includes(order.status)
+              [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(order.status.toLowerCase())
             ).length,
-            completedOrders: orders.filter((order: any) => order.status === 'completed').length,
+            completedOrders: orders.filter((order: any) => order.status.toLowerCase() === ORDER_STATUS.COMPLETED).length,
             totalUsers: 0,
             revenue: orders.reduce(
               (sum: number, order: any) => sum + Number(order.points_price || 0),
