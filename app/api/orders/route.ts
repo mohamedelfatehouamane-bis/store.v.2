@@ -346,24 +346,173 @@ export async function POST(request: NextRequest) {
         basePrice = toWholePoints(offer.points_price, 0);
       }
 
-      // Validate at least one verified seller is available for this game.
-      const { data: candidates, error: candidatesError } = await db
-        .from('seller_games')
-        .select('seller:seller_id(id, user_id, verification_status)')
-        .eq('game_id', game_id)
+// =====================================================
+// CATEGORY-BASED SELLER ROUTING
+// =====================================================
 
-      if (candidatesError) {
-        console.error('Seller candidate query error:', candidatesError)
-        return NextResponse.json({ error: 'Unable to route order' }, { status: 500 })
-      }
+// Resolve product category
+let productCategoryId: string | null = null
 
-      const verifiedCandidate = (candidates ?? []).find(
-        (row: any) => row.seller?.user_id && row.seller?.verification_status === 'verified'
-      )
+if (!usedProductFallback && offer?.product?.id) {
+  const {
+    data: productData,
+    error: productError,
+  } = await db
+    .from('products')
+    .select('category_id')
+    .eq('id', offer.product.id)
+    .single()
 
-      if (!verifiedCandidate?.seller?.user_id) {
-        return NextResponse.json({ error: 'No verified sellers available for this game' }, { status: 400 })
-      }
+  if (productError || !productData) {
+    console.error(
+      'Product category query error:',
+      productError
+    )
+
+    return NextResponse.json(
+      { error: 'Product category not found' },
+      { status: 400 }
+    )
+  }
+
+  productCategoryId = String(
+    productData.category_id
+  )
+} else if (usedProductFallback) {
+  const {
+    data: productData,
+    error: productError,
+  } = await db
+    .from('products')
+    .select('category_id')
+    .eq('id', offer_id)
+    .single()
+
+  if (productError || !productData) {
+    console.error(
+      'Fallback product category error:',
+      productError
+    )
+
+    return NextResponse.json(
+      { error: 'Product category not found' },
+      { status: 400 }
+    )
+  }
+
+  productCategoryId = String(
+    productData.category_id
+  )
+}
+
+if (!productCategoryId) {
+  return NextResponse.json(
+    { error: 'Invalid product category' },
+    { status: 400 }
+  )
+}
+
+// =====================================================
+// GET SELLERS ASSIGNED TO CATEGORY
+// =====================================================
+
+const {
+  data: sellerAssignments,
+  error: assignmentsError,
+} = await db
+  .from('seller_categories')
+  .select('seller_id')
+  .eq('category_id', productCategoryId)
+
+if (assignmentsError) {
+  console.error(
+    'Seller category query error:',
+    assignmentsError
+  )
+
+  return NextResponse.json(
+    { error: 'Unable to route order' },
+    { status: 500 }
+  )
+}
+
+const sellerIds = (
+  sellerAssignments ?? []
+).map((row: any) =>
+  String(row.seller_id)
+)
+
+if (sellerIds.length === 0) {
+  return NextResponse.json(
+    {
+      error:
+        'No sellers assigned to this category',
+    },
+    { status: 400 }
+  )
+}
+
+// =====================================================
+// FETCH VERIFIED SELLERS
+// =====================================================
+
+const {
+  data: verifiedSellers,
+  error: sellersError,
+} = await db
+  .from('users')
+  .select('id, username, role')
+  .in('id', sellerIds)
+  .eq('role', 'seller')
+
+if (sellersError) {
+  console.error(
+    'Verified sellers query error:',
+    sellersError
+  )
+
+  return NextResponse.json(
+    { error: 'Unable to load sellers' },
+    { status: 500 }
+  )
+}
+
+if (
+  !verifiedSellers ||
+  verifiedSellers.length === 0
+) {
+  return NextResponse.json(
+    {
+      error:
+        'No verified sellers available',
+    },
+    { status: 400 }
+  )
+}
+
+// =====================================================
+// AUTO ASSIGN FIRST SELLER
+// =====================================================
+
+const selectedSeller =
+  verifiedSellers[0]
+
+assignedSellerUserId = String(
+  selectedSeller.id
+)
+
+// Assign seller to order
+orderInsertData = {
+  customer_id: auth.id,
+  offer_id: usedProductFallback
+    ? null
+    : offer_id,
+  assigned_seller_id:
+    assignedSellerUserId,
+  game_account_id: account_id,
+  points_amount: pointsPrice,
+  status: ORDER_STATUS.PENDING,
+}
 
       notificationProductType = resolvedProductType;
       notificationProductSellerId = resolvedProductSellerId;
