@@ -4,8 +4,13 @@ import { verifyToken, resolveUserId } from '@/lib/auth'
 import { telegramService } from '@/lib/telegram-service'
 import { z } from 'zod'
 
+const MIN_WITHDRAWAL_AMOUNT = 1000
+
 const withdrawalSchema = z.object({
-  amount: z.preprocess((value) => Number(value), z.number().int().positive()),
+  amount: z.preprocess(
+    (value) => Number(value),
+    z.number().int().min(MIN_WITHDRAWAL_AMOUNT, `Minimum withdrawal is ${MIN_WITHDRAWAL_AMOUNT} points`)
+  ),
   payment_name: z.string().trim().min(2).max(120).optional(),
   bank_account_info: z.string().trim().min(5).optional(),
 })
@@ -140,8 +145,24 @@ export async function POST(request: NextRequest) {
 
     if (payload.amount > availablePoints) {
       return NextResponse.json(
-        { error: 'Insufficient points available for withdrawal' },
+        { error: 'Insufficient balance for withdrawal' },
         { status: 400 }
+      )
+    }
+
+    // Block multiple pending withdrawals
+    const sellerIdCandidates = Array.from(new Set([resolvedUserId, sellerProfileId].filter(Boolean)))
+    const { data: pendingRows } = await db
+      .from('withdrawals')
+      .select('id')
+      .in('seller_id', sellerIdCandidates)
+      .eq('status', 'pending')
+      .limit(1)
+
+    if ((pendingRows ?? []).length > 0) {
+      return NextResponse.json(
+        { error: 'You already have a pending withdrawal request' },
+        { status: 409 }
       )
     }
 
@@ -195,6 +216,23 @@ export async function POST(request: NextRequest) {
       console.error('Create withdrawal request error:', insertError)
       return NextResponse.json(
         { error: insertError?.message ?? 'Unable to create withdrawal request' },
+        { status: 500 }
+      )
+    }
+
+    // Deduct the requested amount from seller's balance (points)
+    const newPoints = Math.max(0, availablePoints - payload.amount)
+    const { error: deductError } = await db
+      .from('users')
+      .update({ points: newPoints })
+      .eq('id', resolvedUserId)
+
+    if (deductError) {
+      // Rollback: delete the withdrawal we just created
+      await db.from('withdrawals').delete().eq('id', newRequest.id)
+      console.error('Balance deduction error:', deductError)
+      return NextResponse.json(
+        { error: 'Unable to process withdrawal – balance could not be updated' },
         { status: 500 }
       )
     }
