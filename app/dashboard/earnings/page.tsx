@@ -12,6 +12,7 @@ type OrderItem = {
   id: string;
   product_name: string;
   points_price: number;
+  seller_earnings?: number;
   status: string;
   created_at: string;
 };
@@ -218,9 +219,9 @@ export default function EarningsPage() {
       });
       return {
         month: label,
-        earned: monthOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0),
-        pending: monthOrders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).reduce((sum, order) => sum + Number(order.points_price || 0), 0),
-        released: monthOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0),
+        earned: monthOrders.reduce((sum, order) => sum + Number(order.seller_earnings ?? order.points_price ?? 0), 0),
+        pending: monthOrders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).reduce((sum, order) => sum + Number(order.seller_earnings ?? order.points_price ?? 0), 0),
+        released: monthOrders.reduce((sum, order) => sum + Number(order.seller_earnings ?? order.points_price ?? 0), 0),
       };
     });
   }, [approvedOrders]);
@@ -237,7 +238,7 @@ export default function EarningsPage() {
           const created = new Date(order.created_at);
           return created >= start && created < end;
         })
-        .reduce((sum, order) => sum + Number(order.points_price || 0), 0);
+        .reduce((sum, order) => sum + Number(order.seller_earnings ?? order.points_price ?? 0), 0);
       return {
         month: `Week ${index + 1}`,
         earnings,
@@ -245,14 +246,14 @@ export default function EarningsPage() {
     });
   }, [approvedOrders]);
 
-  const totalEarned = approvedOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0);
-  const totalReleased = approvedOrders.reduce((sum, order) => sum + Number(order.points_price || 0), 0);
-  const pendingAmount = orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).reduce((sum, order) => sum + Number(order.points_price || 0), 0);
+  const totalEarned = approvedOrders.reduce((sum, order) => sum + Number(order.seller_earnings ?? order.points_price ?? 0), 0);
+  const totalReleased = approvedOrders.reduce((sum, order) => sum + Number(order.seller_earnings ?? order.points_price ?? 0), 0);
+  const pendingAmount = orders.filter((order) => order.status.toLowerCase() === ORDER_STATUS.PENDING).reduce((sum, order) => sum + Number(order.seller_earnings ?? order.points_price ?? 0), 0);
 
   const recentTransactions = orders.slice(0, 4).map((order) => ({
     id: order.id,
     task: order.product_name,
-    amount: order.points_price,
+    amount: order.seller_earnings ?? order.points_price,
     status: order.status,
     date: new Date(order.created_at).toLocaleDateString(),
   }));
