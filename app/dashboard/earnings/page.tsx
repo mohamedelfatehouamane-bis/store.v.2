@@ -79,6 +79,11 @@ export default function EarningsPage() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawPaymentName, setWithdrawPaymentName] = useState('');
+  const [withdrawBankAccount, setWithdrawBankAccount] = useState('');
+  const [showWithdrawForm, setShowWithdrawForm] = useState(false);
+
   const isSeller = user?.role === 'seller';
 
   const loadEarnings = async () => {
@@ -140,12 +145,20 @@ export default function EarningsPage() {
     loadEarnings();
   }, [isSeller]);
 
-  const handleRequestWithdrawal = async () => {
+  const handleRequestWithdrawal = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('')
     setSuccessMessage('')
 
-    if (!isSeller) {
-      setError('Only sellers can request withdrawals.')
+    const amount = Number(withdrawAmount)
+    if (!Number.isInteger(amount) || amount < 1000) {
+      setError('Minimum withdrawal amount is 1,000 points.')
+      return
+    }
+
+    const availableBalance = Number(profile?.balance ?? 0)
+    if (amount > availableBalance) {
+      setError('Insufficient balance for this withdrawal amount.')
       return
     }
 
@@ -154,20 +167,6 @@ export default function EarningsPage() {
       setError('Authentication required')
       return
     }
-
-    const amountInput = window.prompt('Enter withdrawal amount (whole points):')
-    if (!amountInput) {
-      return
-    }
-
-    const amount = Number(amountInput)
-    if (!Number.isInteger(amount) || amount <= 0) {
-      setError('Enter a valid whole amount for withdrawal.')
-      return
-    }
-
-    const bankAccount = window.prompt('Enter your bank account details for payout (optional):')
-    const paymentName = window.prompt('Enter payment name/method (e.g. Vodafone Cash, Bank Transfer):')
 
     try {
       setRequestingWithdrawal(true)
@@ -179,8 +178,8 @@ export default function EarningsPage() {
         },
         body: JSON.stringify({
           amount,
-          payment_name: paymentName?.trim() || undefined,
-          bank_account_info: bankAccount?.trim() || undefined,
+          payment_name: withdrawPaymentName.trim() || undefined,
+          bank_account_info: withdrawBankAccount.trim() || undefined,
         }),
       })
 
@@ -190,6 +189,10 @@ export default function EarningsPage() {
       }
 
       setSuccessMessage(data.message || 'Withdrawal request submitted.')
+      setWithdrawAmount('')
+      setWithdrawPaymentName('')
+      setWithdrawBankAccount('')
+      setShowWithdrawForm(false)
       await loadEarnings()
     } catch (err) {
       console.error(err)
@@ -552,25 +555,96 @@ export default function EarningsPage() {
       <Card className="mt-8">
         <CardHeader>
           <CardTitle>Withdraw Earnings</CardTitle>
-          <CardDescription>Request a withdrawal to your bank account</CardDescription>
+          <CardDescription>Request a payout from your available balance</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <p className="text-sm text-slate-600 mb-2">Available Balance</p>
-              <p className="text-3xl font-bold text-green-600">{profile?.balance?.toLocaleString() ?? '0'}</p>
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <p className="text-sm text-slate-600 mb-1">Available Balance</p>
+              <p className="text-3xl font-bold text-green-600">
+                {Number(profile?.balance ?? 0).toLocaleString()} pts
+              </p>
             </div>
-            <Button
-              size="lg"
-              className="bg-green-600 hover:bg-green-700"
-              onClick={handleRequestWithdrawal}
-              disabled={requestingWithdrawal}
-            >
-              {requestingWithdrawal ? 'Submitting...' : 'Request Withdrawal'}
-            </Button>
+            {!showWithdrawForm && (
+              <Button
+                size="lg"
+                className="bg-green-600 hover:bg-green-700 text-white"
+                onClick={() => setShowWithdrawForm(true)}
+                disabled={Number(profile?.balance ?? 0) < 1000}
+              >
+                Request Withdrawal
+              </Button>
+            )}
           </div>
+
+          {showWithdrawForm && (
+            <form onSubmit={handleRequestWithdrawal} className="mt-4 space-y-4 border-t border-slate-200 pt-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Amount (min 1,000 pts)
+                </label>
+                <input
+                  type="number"
+                  min={1000}
+                  step={1}
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="Enter amount"
+                  required
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Payment method (e.g. Vodafone Cash, Bank Transfer)
+                </label>
+                <input
+                  type="text"
+                  value={withdrawPaymentName}
+                  onChange={(e) => setWithdrawPaymentName(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="Payment method"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Bank / account details (optional)
+                </label>
+                <input
+                  type="text"
+                  value={withdrawBankAccount}
+                  onChange={(e) => setWithdrawBankAccount(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="Account number or details"
+                />
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  type="submit"
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                  disabled={requestingWithdrawal}
+                >
+                  {requestingWithdrawal ? 'Submitting…' : 'Submit Request'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowWithdrawForm(false);
+                    setWithdrawAmount('');
+                    setWithdrawPaymentName('');
+                    setWithdrawBankAccount('');
+                  }}
+                  disabled={requestingWithdrawal}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
         </CardContent>
       </Card>
+
       <Card className="mt-8">
         <CardHeader>
           <CardTitle>Withdrawal History</CardTitle>
@@ -580,41 +654,49 @@ export default function EarningsPage() {
           {loading ? (
             <div className="py-12 text-center text-slate-500">Loading withdrawal history...</div>
           ) : withdrawals.length > 0 ? (
-            <div className="space-y-4">
-              {withdrawals.map((withdrawal) => (
-                <div key={withdrawal.id} className="flex flex-col gap-2 p-4 border border-slate-200 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium text-slate-900">Request #{withdrawal.id}</p>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        withdrawal.status === 'approved'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : withdrawal.status === 'rejected'
-                          ? 'bg-rose-100 text-rose-700'
-                          : 'bg-yellow-100 text-yellow-700'
-                      }`}
-                    >
-                      {withdrawal.status}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-                    <span>Amount: {withdrawal.amount.toLocaleString()}</span>
-                    {withdrawal.fee_percentage !== undefined && (
-                      <span>Fee: {withdrawal.fee_percentage}%</span>
-                    )}
-                    {withdrawal.final_amount !== undefined && (
-                      <span>Final: {withdrawal.final_amount.toLocaleString()}</span>
-                    )}
-                    {withdrawal.payment_name && (
-                      <span>Payment: {withdrawal.payment_name}</span>
-                    )}
-                    <span>Requested: {new Date(withdrawal.created_at).toLocaleDateString()}</span>
-                    {withdrawal.processed_at && (
-                      <span>Processed: {new Date(withdrawal.processed_at).toLocaleDateString()}</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="pb-2 pr-4">Amount</th>
+                    <th className="pb-2 pr-4">Fee</th>
+                    <th className="pb-2 pr-4">Final</th>
+                    <th className="pb-2 pr-4">Status</th>
+                    <th className="pb-2">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {withdrawals.map((w) => (
+                    <tr key={w.id} className="py-2">
+                      <td className="py-3 pr-4 font-medium text-slate-900">
+                        {w.amount.toLocaleString()} pts
+                      </td>
+                      <td className="py-3 pr-4 text-slate-600">
+                        {w.fee_percentage ?? 0}%
+                      </td>
+                      <td className="py-3 pr-4 text-slate-900 font-medium">
+                        {(w.final_amount ?? w.amount).toLocaleString()} pts
+                      </td>
+                      <td className="py-3 pr-4">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            w.status === 'approved'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : w.status === 'rejected'
+                              ? 'bg-rose-100 text-rose-700'
+                              : 'bg-yellow-100 text-yellow-700'
+                          }`}
+                        >
+                          {w.status}
+                        </span>
+                      </td>
+                      <td className="py-3 text-slate-500">
+                        {new Date(w.created_at).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : (
             <div className="py-12 text-center text-slate-600">
@@ -622,6 +704,7 @@ export default function EarningsPage() {
             </div>
           )}
         </CardContent>
-      </Card>    </div>
+      </Card>
+    </div>
   );
 }

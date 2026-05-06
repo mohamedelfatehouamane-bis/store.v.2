@@ -24,6 +24,7 @@ import {
   ClipboardCheck,
   CreditCard,
   Layers,
+  ArrowDownRight,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -130,6 +131,7 @@ function DashboardNavContent({
       links: [
         { href: '/dashboard/orders', label: t('allOrders'), icon: ShoppingCart },
         { href: '/dashboard/topup', label: t('topupRequests'), icon: DollarSign },
+        { href: '/dashboard/admin/withdrawals', label: t('withdrawalRequests'), icon: ArrowDownRight },
         { href: '/dashboard/finance', label: t('finance'), icon: BarChart3 },
         { href: '/dashboard/admin/disputes', label: t('disputes'), icon: ShieldAlert },
       ],
