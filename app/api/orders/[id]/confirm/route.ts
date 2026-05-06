@@ -12,7 +12,9 @@ async function releaseOrderFunds(order: any) {
   }
 
   const paymentAmount = Number(order.points_amount ?? 0)
-  const payoutAmount = paymentAmount
+  const payoutAmount = order.seller_earnings != null
+    ? Number(order.seller_earnings)
+    : paymentAmount
 
   if (payoutAmount <= 0) {
     return { success: false, error: 'No seller payout is configured for this order' }

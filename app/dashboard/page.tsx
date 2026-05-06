@@ -132,7 +132,7 @@ export default function DashboardHome() {
 
           const earnings = myTasks
             .filter((o: any) => o.status === ORDER_STATUS.COMPLETED)
-            .reduce((sum: number, o: any) => sum + Number(o.points_price || 0), 0);
+            .reduce((sum: number, o: any) => sum + Number(o.seller_earnings ?? o.points_price ?? 0), 0);
 
           setProfile(profileData.user ?? null);
           setStats({
@@ -255,10 +255,10 @@ export default function DashboardHome() {
           )}
           {isSeller && (
             <>
-              <Link href="/dashboard/topup">
+              <Link href="/dashboard/earnings">
                 <button className="flex w-full flex-col items-center gap-2 rounded-xl border border-slate-200 bg-white p-4 text-center transition hover:border-slate-300 hover:shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600">
                   <DollarSign className="h-6 w-6 text-emerald-600" />
-                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Top Up Balance</span>
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Withdraw Earnings</span>
                 </button>
               </Link>
               <Link href="/dashboard/tasks">
@@ -313,7 +313,7 @@ export default function DashboardHome() {
       </div>
 
       {/* Stats */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3 sm:mb-8">
+      <div className={`mb-6 grid grid-cols-1 gap-4 sm:mb-8 ${isSeller ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3'}`}>
         {isAdmin ? (
           <>
             <Card>
@@ -351,18 +351,28 @@ export default function DashboardHome() {
           <>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Earnings</CardTitle>
-                <DollarSign className="h-4 w-4 text-emerald-600" />
+                <CardTitle className="text-sm font-medium">Available Balance</CardTitle>
+                <Award className="h-4 w-4 text-emerald-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.totalPoints.toLocaleString()} pts</div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Withdrawable earnings</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Lifetime Earnings</CardTitle>
+                <DollarSign className="h-4 w-4 text-blue-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.revenue.toLocaleString()} pts</div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Points earned from completed orders</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Total earned from completed orders</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Active Orders</CardTitle>
-                <Zap className="h-4 w-4 text-blue-600" />
+                <Zap className="h-4 w-4 text-orange-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.activeOrders}</div>

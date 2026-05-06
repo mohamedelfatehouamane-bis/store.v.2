@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
     const baseQuery = db
       .from('orders')
       .select(
-        `id, customer_id, assigned_seller_id, status, points_amount, created_at, offer_id`
+        `id, customer_id, assigned_seller_id, status, points_amount, seller_earnings, created_at, offer_id`
       )
       .order('created_at', { ascending: false });
 
@@ -181,12 +181,16 @@ export async function GET(request: NextRequest) {
 
     const normalizedOrders = orders.map((order) => {
       const offer = offersMap[order.offer_id] ?? { points_price: 0, name: '', game_name: '' };
+      const orderPointsPrice: number = offer.points_price ?? order.points_amount ?? 0;
+      const sellerEarnings: number =
+        order.seller_earnings != null ? Number(order.seller_earnings) : orderPointsPrice;
       return {
         id: order.id,
         product_name: offer.name ?? '',
         game_name: offer.game_name ?? '',
         status: normalizeStatus(order.status),
-        points_price: offer.points_price ?? order.points_amount ?? 0,
+        points_price: orderPointsPrice,
+        seller_earnings: sellerEarnings,
         assigned_seller_id: order.assigned_seller_id,
         created_at: order.created_at,
       };
