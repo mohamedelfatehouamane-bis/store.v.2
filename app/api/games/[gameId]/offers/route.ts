@@ -26,11 +26,33 @@ export async function GET(
 
     const gameRow: any = game
 
-    // Get all products for this game
+    // Get all categories for this game
+    const { data: categories, error: categoriesError } = await supabase
+      .from('categories')
+      .select('id')
+      .eq('game_id', gameId)
+
+    if (categoriesError) {
+      console.error('Categories query error:', categoriesError)
+      return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 })
+    }
+
+    const categoryIds = Array.from(
+      new Set((categories ?? []).map((category: any) => category.id).filter(Boolean))
+    )
+
+    if (categoryIds.length === 0) {
+      return NextResponse.json({
+        game: { id: gameRow.id, name: gameRow.name },
+        offers: [],
+      })
+    }
+
+    // Get all products for this game via category membership
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('id, name, description, image_url, points_price, type')
-      .eq('game_id', gameId)
+      .in('category_id', categoryIds)
       .eq('is_active', true)
       .order('name', { ascending: true })
 
