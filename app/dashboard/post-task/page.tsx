@@ -28,7 +28,7 @@ type SellerItem = {
   trust_badge?: 'top' | 'trusted' | 'warning';
   is_risky?: boolean;
   total_points?: number;
-  assigned_games?: string | null;
+  assigned_categories?: string | null;
 };
 
 type GameAccountItem = {
