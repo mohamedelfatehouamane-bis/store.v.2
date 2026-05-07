@@ -35,7 +35,9 @@ export async function POST(
 
     if (!auth) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        {
+          error: 'Unauthorized',
+        },
         { status: 401 }
       )
     }
@@ -74,7 +76,13 @@ export async function POST(
         category_id,
         game_id,
         is_active,
+
         games (
+          id,
+          name
+        ),
+
+        categories (
           id,
           name
         )
@@ -90,10 +98,16 @@ export async function POST(
       )
 
       return NextResponse.json(
-        { error: 'Product not found' },
+        {
+          error: 'Product not found',
+        },
         { status: 404 }
       )
     }
+
+    // =====================================================
+    // VALIDATE GAME
+    // =====================================================
 
     if (
       String(product.game_id) !==
@@ -102,7 +116,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'Product does not belong to selected game',
+            'Selected product does not belong to this game',
         },
         { status: 400 }
       )
@@ -117,7 +131,9 @@ export async function POST(
       error: assignmentsError,
     } = await db
       .from('seller_categories')
-      .select('seller_id')
+      .select(`
+        seller_id
+      `)
       .eq(
         'category_id',
         product.category_id
@@ -125,14 +141,14 @@ export async function POST(
 
     if (assignmentsError) {
       console.error(
-        'Assignments error:',
+        'Seller assignment error:',
         assignmentsError
       )
 
       return NextResponse.json(
         {
           error:
-            'Unable to load seller assignments',
+            'Unable to load category sellers',
         },
         { status: 500 }
       )
@@ -151,14 +167,14 @@ export async function POST(
       )
     }
 
-    const sellerIds = assignments.map(
-      (item: any) =>
-        String(item.seller_id)
-    )
+    // =====================================================
+    // GET VALID SELLERS
+    // =====================================================
 
-    // =====================================================
-    // GET VERIFIED SELLERS
-    // =====================================================
+    const sellerIds = assignments.map(
+      (assignment: any) =>
+        String(assignment.seller_id)
+    )
 
     const {
       data: sellers,
@@ -168,7 +184,8 @@ export async function POST(
       .select(`
         id,
         username,
-        role
+        role,
+        status
       `)
       .in('id', sellerIds)
       .eq('role', 'seller')
@@ -195,18 +212,41 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'No verified sellers found',
+            'No valid sellers found',
         },
         { status: 400 }
       )
     }
 
     // =====================================================
-    // PICK FIRST SELLER
+    // FILTER APPROVED SELLERS
+    // =====================================================
+
+    const approvedSellers =
+      sellers.filter(
+        (seller: any) =>
+          seller.status ===
+          'approved'
+      )
+
+    if (
+      approvedSellers.length === 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'No approved sellers available',
+        },
+        { status: 400 }
+      )
+    }
+
+    // =====================================================
+    // PICK SELLER
     // =====================================================
 
     const selectedSeller =
-      sellers[0]
+      approvedSellers[0]
 
     const assignedSellerId =
       selectedSeller.id
@@ -256,7 +296,7 @@ export async function POST(
     }
 
     // =====================================================
-    // VERIFY USER BALANCE
+    // VERIFY CUSTOMER BALANCE
     // =====================================================
 
     const {
@@ -264,7 +304,10 @@ export async function POST(
       error: customerError,
     } = await db
       .from('users')
-      .select('id, points')
+      .select(`
+        id,
+        points
+      `)
       .eq('id', auth.id)
       .single()
 
@@ -299,7 +342,7 @@ export async function POST(
     }
 
     // =====================================================
-    // DEDUCT CUSTOMER POINTS
+    // DEDUCT POINTS
     // =====================================================
 
     const newBalance =
@@ -307,7 +350,7 @@ export async function POST(
       pointsPrice
 
     const {
-      error: updateBalanceError,
+      error: balanceError,
     } = await db
       .from('users')
       .update({
@@ -315,10 +358,10 @@ export async function POST(
       })
       .eq('id', auth.id)
 
-    if (updateBalanceError) {
+    if (balanceError) {
       console.error(
         'Balance update error:',
-        updateBalanceError
+        balanceError
       )
 
       return NextResponse.json(
@@ -333,6 +376,9 @@ export async function POST(
     // =====================================================
     // CREATE ORDER
     // =====================================================
+
+    const sellerEarnings =
+      pointsPrice
 
     const {
       data: order,
@@ -354,7 +400,7 @@ export async function POST(
           pointsPrice,
 
         seller_earnings:
-          pointsPrice,
+          sellerEarnings,
 
         status: 'pending',
 
@@ -364,15 +410,28 @@ export async function POST(
         game_name:
           product.games?.name ??
           '',
+
+        category_id:
+          product.category_id,
       })
       .select()
       .single()
 
     if (orderError || !order) {
       console.error(
-        'Create order error:',
+        'Order creation error:',
         orderError
       )
+
+      // REFUND CUSTOMER
+
+      await db
+        .from('users')
+        .update({
+          points:
+            Number(customer.points),
+        })
+        .eq('id', auth.id)
 
       return NextResponse.json(
         {
@@ -385,7 +444,7 @@ export async function POST(
     }
 
     // =====================================================
-    // ADD POINT TRANSACTION
+    // CREATE TRANSACTION
     // =====================================================
 
     await db
@@ -395,7 +454,8 @@ export async function POST(
 
         amount: -pointsPrice,
 
-        transaction_type: 'spend',
+        transaction_type:
+          'spend',
 
         related_order_id:
           order.id,
@@ -416,8 +476,11 @@ export async function POST(
     ) {
       return NextResponse.json(
         {
-          error: 'Validation error',
-          details: error.errors,
+          error:
+            'Validation error',
+
+          details:
+            error.errors,
         },
         { status: 400 }
       )
