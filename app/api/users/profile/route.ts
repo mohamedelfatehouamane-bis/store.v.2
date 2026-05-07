@@ -186,24 +186,6 @@ export async function GET(
             item.category_id
         )
 
-      const assigned_games =
-        Array.from(
-          new Set(
-            (
-              assignments ??
-              []
-            ).map(
-              (
-                item: any
-              ) =>
-                item
-                  .categories
-                  ?.games
-                  ?.name
-            )
-          )
-        ).filter(Boolean)
-
       sellerData = {
         business_name:
           user.username,
@@ -214,8 +196,6 @@ export async function GET(
         assigned_categories,
 
         assigned_category_ids,
-
-        assigned_games,
 
         average_rating: 0,
 
