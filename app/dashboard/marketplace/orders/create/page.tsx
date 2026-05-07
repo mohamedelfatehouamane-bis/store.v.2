@@ -1,10 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+
 import {
   useRouter,
   useSearchParams,
 } from 'next/navigation'
+
+import Link from 'next/link'
 
 import {
   Card,
@@ -16,8 +19,6 @@ import {
 
 import { Button } from '@/components/ui/button'
 
-import { Badge } from '@/components/ui/badge'
-
 import {
   ArrowLeft,
   Loader2,
@@ -26,7 +27,6 @@ import {
 } from 'lucide-react'
 
 import { useAuth } from '@/lib/auth-context'
-import { useLanguage } from '@/lib/language-context'
 
 import { toast } from 'sonner'
 
@@ -41,8 +41,8 @@ type GameAccount = {
 type Product = {
   id: string
   name: string
-  quantity: number
-  unit: string
+  quantity?: number
+  unit?: string
   points_price: number
   description?: string
 }
@@ -56,11 +56,8 @@ export default function CreateOrderPage() {
   const { user, token } =
     useAuth()
 
-  const { t } =
-    useLanguage()
-
   // IMPORTANT:
-  // offerId in URL is actually product ID now
+  // offerId is now product ID
   const productId =
     searchParams.get('offerId')
 
@@ -114,9 +111,9 @@ export default function CreateOrderPage() {
     setUserBalance,
   ] = useState(0)
 
-  // ==================================================
-  // VALIDATE
-  // ==================================================
+  // ======================================================
+  // VALIDATE ACCESS
+  // ======================================================
 
   useEffect(() => {
     if (!user) {
@@ -124,11 +121,13 @@ export default function CreateOrderPage() {
       return
     }
 
-    if (!productId || !gameId) {
+    if (
+      !productId ||
+      !gameId
+    ) {
       router.push(
-        '/dashboard/marketplace/games'
+        '/dashboard/marketplace'
       )
-      return
     }
   }, [
     user,
@@ -137,41 +136,45 @@ export default function CreateOrderPage() {
     router,
   ])
 
-  // ==================================================
+  // ======================================================
   // LOAD DATA
-  // ==================================================
+  // ======================================================
 
   useEffect(() => {
     async function loadData() {
-      setLoading(true)
-
-      setError('')
-
       try {
+        setLoading(true)
+
+        setError('')
+
         if (!token) {
           throw new Error(
             'Authentication required'
           )
         }
 
+        // ==========================================
         // LOAD PRODUCTS
+        // ==========================================
 
-        const response =
+        const productResponse =
           await fetch(
             `/api/games/${gameId}/offers`
           )
 
-        if (!response.ok) {
+        if (
+          !productResponse.ok
+        ) {
           throw new Error(
             'Failed to load products'
           )
         }
 
-        const data =
-          await response.json()
+        const productData =
+          await productResponse.json()
 
         const foundProduct =
-          data.offers?.find(
+          productData.offers?.find(
             (p: Product) =>
               p.id === productId
           )
@@ -184,7 +187,9 @@ export default function CreateOrderPage() {
 
         setProduct(foundProduct)
 
-        // LOAD ACCOUNTS
+        // ==========================================
+        // LOAD GAME ACCOUNTS
+        // ==========================================
 
         const accountsResponse =
           await fetch(
@@ -200,7 +205,7 @@ export default function CreateOrderPage() {
           !accountsResponse.ok
         ) {
           throw new Error(
-            'Failed to load game accounts'
+            'Failed to load accounts'
           )
         }
 
@@ -208,10 +213,13 @@ export default function CreateOrderPage() {
           await accountsResponse.json()
 
         setGameAccounts(
-          accountsData.accounts || []
+          accountsData.accounts ||
+            []
         )
 
+        // ==========================================
         // LOAD USER BALANCE
+        // ==========================================
 
         const profileResponse =
           await fetch(
@@ -230,21 +238,22 @@ export default function CreateOrderPage() {
             await profileResponse.json()
 
           setUserBalance(
-            profileData.user
-              ?.points ??
-              0
+            Number(
+              profileData.user
+                ?.points ?? 0
+            )
           )
         }
       } catch (err) {
         console.error(
-          'Load order error:',
+          'Load create order error:',
           err
         )
 
         setError(
           err instanceof Error
             ? err.message
-            : 'Failed to load'
+            : 'Failed to load data'
         )
       } finally {
         setLoading(false)
@@ -254,47 +263,43 @@ export default function CreateOrderPage() {
     if (token) {
       loadData()
     }
-  }, [token, gameId, productId])
+  }, [
+    token,
+    productId,
+    gameId,
+  ])
 
-  // ==================================================
+  // ======================================================
+  // FILTER ACCOUNTS
+  // ======================================================
+
+  const accountsForGame =
+    useMemo(() => {
+      return gameAccounts.filter(
+        (account) =>
+          String(
+            account.game_id
+          ) === String(gameId)
+      )
+    }, [gameAccounts, gameId])
+
+  // ======================================================
+  // ORDER VALUES
+  // ======================================================
+
+  const requiredPoints =
+    (product?.points_price || 0) *
+    orderQuantity
+
+  const hasEnoughPoints =
+    userBalance >= requiredPoints
+
+  // ======================================================
   // CREATE ORDER
-  // ==================================================
+  // ======================================================
 
   const handleCreateOrder =
     async () => {
-      if (!selectedAccountId) {
-        toast.error(
-          'Select game account'
-        )
-
-        return
-      }
-
-      if (!product) {
-        toast.error(
-          'Product not loaded'
-        )
-
-        return
-      }
-
-      const requiredPoints =
-        product.points_price *
-        orderQuantity
-
-      if (
-        userBalance <
-        requiredPoints
-      ) {
-        toast.error(
-          'Insufficient points'
-        )
-
-        return
-      }
-
-      setSubmitting(true)
-
       try {
         if (!token) {
           throw new Error(
@@ -302,8 +307,31 @@ export default function CreateOrderPage() {
           )
         }
 
-        // IMPORTANT:
-        // BACKEND EXPECTS product_id
+        if (!product) {
+          throw new Error(
+            'Product not found'
+          )
+        }
+
+        if (!selectedAccountId) {
+          toast.error(
+            'Please select a game account'
+          )
+
+          return
+        }
+
+        if (
+          !hasEnoughPoints
+        ) {
+          toast.error(
+            'Insufficient points'
+          )
+
+          return
+        }
+
+        setSubmitting(true)
 
         const payload = {
           game_id: gameId,
@@ -313,7 +341,7 @@ export default function CreateOrderPage() {
         }
 
         console.log(
-          'ORDER PAYLOAD:',
+          'CREATE ORDER PAYLOAD:',
           payload
         )
 
@@ -370,45 +398,22 @@ export default function CreateOrderPage() {
         toast.error(
           err instanceof Error
             ? err.message
-            : 'Error creating order'
+            : 'Failed to create order'
         )
       } finally {
         setSubmitting(false)
       }
     }
 
-  // ==================================================
-  // HELPERS
-  // ==================================================
-
-  const handleGoBack = () => {
-    router.push(
-      `/dashboard/marketplace/offers/game/${gameId}`
-    )
-  }
-
-  const accountsForGame =
-    gameAccounts.filter(
-      (a) =>
-        a.game_id === gameId
-    )
-
-  const requiredPoints =
-    (product?.points_price || 0) *
-    orderQuantity
-
-  const hasEnoughPoints =
-    userBalance >= requiredPoints
-
-  // ==================================================
+  // ======================================================
   // LOADING
-  // ==================================================
+  // ======================================================
 
   if (loading) {
     return (
-      <div className="flex-1 p-8 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 min-h-screen flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-slate-950">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
+          <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-blue-500" />
 
           <p className="text-slate-400">
             Loading...
@@ -418,205 +423,258 @@ export default function CreateOrderPage() {
     )
   }
 
-  // ==================================================
-  // UI
-  // ==================================================
+  // ======================================================
+  // ERROR
+  // ======================================================
 
-  return (
-    <div className="flex-1 p-8 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 min-h-screen">
-      <div className="mb-8">
-        <Button
-          variant="ghost"
-          onClick={
-            handleGoBack
-          }
-          className="text-slate-400 hover:text-white"
-        >
-          <ArrowLeft className="h-5 w-5 mr-2" />
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 p-6">
+        <Card className="w-full max-w-lg border-red-900/40 bg-red-950/20">
+          <CardContent className="py-10 text-center">
+            <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
 
-          Back
-        </Button>
-
-        <h1 className="text-4xl font-bold text-white mt-4">
-          Confirm Order
-        </h1>
-      </div>
-
-      {error && (
-        <div className="mb-6 rounded-lg border border-red-900/30 bg-red-950/20 px-4 py-3 text-red-400 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
-
-          <div>
-            <p className="font-semibold">
+            <h2 className="mb-2 text-xl font-bold text-white">
               Error
-            </p>
+            </h2>
 
-            <p className="text-sm">
+            <p className="mb-6 text-red-300">
               {error}
             </p>
-          </div>
+
+            <Button
+              onClick={() =>
+                router.push(
+                  '/dashboard/marketplace'
+                )
+              }
+            >
+              Return To Marketplace
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ======================================================
+  // UI
+  // ======================================================
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 p-8">
+      <div className="mx-auto max-w-7xl">
+        {/* HEADER */}
+
+        <div className="mb-8">
+          <Link
+            href={`/dashboard/marketplace/offers/game/${gameId}`}
+          >
+            <Button
+              variant="ghost"
+              className="mb-4 text-slate-400 hover:text-white"
+            >
+              <ArrowLeft className="mr-2 h-5 w-5" />
+
+              Back
+            </Button>
+          </Link>
+
+          <h1 className="text-4xl font-bold text-white">
+            Confirm Order
+          </h1>
         </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          <Card className="bg-slate-800/50 border-slate-700">
-            <CardHeader>
-              <CardTitle className="text-white">
-                Product Details
-              </CardTitle>
-            </CardHeader>
+        {/* CONTENT */}
 
-            <CardContent className="space-y-4">
-              <div>
-                <p className="text-xs text-slate-400">
-                  Product
-                </p>
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+          {/* LEFT */}
 
-                <p className="text-white font-semibold text-lg">
-                  {product?.name}
-                </p>
-              </div>
+          <div className="space-y-6 lg:col-span-2">
+            {/* PRODUCT */}
 
-              <div>
-                <p className="text-xs text-slate-400">
-                  Price
-                </p>
+            <Card className="border-slate-700 bg-slate-800/50">
+              <CardHeader>
+                <CardTitle className="text-white">
+                  Product Details
+                </CardTitle>
+              </CardHeader>
 
-                <p className="text-blue-400 font-bold text-2xl">
-                  {
-                    product?.points_price
-                  }{' '}
-                  pts
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-xs text-slate-400">
+                    Product
+                  </p>
 
-          <Card className="bg-slate-800/50 border-slate-700">
-            <CardHeader>
-              <CardTitle className="text-white">
-                Select Account
-              </CardTitle>
+                  <p className="text-lg font-semibold text-white">
+                    {product?.name}
+                  </p>
+                </div>
 
-              <CardDescription>
-                Choose game account
-              </CardDescription>
-            </CardHeader>
+                <div>
+                  <p className="text-xs text-slate-400">
+                    Price
+                  </p>
 
-            <CardContent className="space-y-3">
-              {accountsForGame.map(
-                (account) => (
-                  <button
-                    key={
-                      account.id
-                    }
-                    onClick={() =>
-                      setSelectedAccountId(
-                        account.id
-                      )
-                    }
-                    className={`w-full p-4 rounded-lg border-2 text-left ${
-                      selectedAccountId ===
-                      account.id
-                        ? 'border-blue-500 bg-blue-950/20'
-                        : 'border-slate-700'
+                  <p className="text-2xl font-bold text-blue-400">
+                    {
+                      product?.points_price
+                    }{' '}
+                    pts
+                  </p>
+                </div>
+
+                {product?.description && (
+                  <div>
+                    <p className="text-xs text-slate-400">
+                      Description
+                    </p>
+
+                    <p className="text-sm text-slate-300">
+                      {
+                        product.description
+                      }
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ACCOUNTS */}
+
+            <Card className="border-slate-700 bg-slate-800/50">
+              <CardHeader>
+                <CardTitle className="text-white">
+                  Select Account
+                </CardTitle>
+
+                <CardDescription>
+                  Choose your game
+                  account
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+                {accountsForGame.length ===
+                0 ? (
+                  <div className="rounded-lg border border-yellow-900/40 bg-yellow-950/20 p-4 text-yellow-300">
+                    No accounts found for
+                    this game.
+                  </div>
+                ) : (
+                  accountsForGame.map(
+                    (account) => (
+                      <button
+                        key={
+                          account.id
+                        }
+                        onClick={() =>
+                          setSelectedAccountId(
+                            account.id
+                          )
+                        }
+                        className={`w-full rounded-lg border-2 p-4 text-left transition ${
+                          selectedAccountId ===
+                          account.id
+                            ? 'border-blue-500 bg-blue-950/20'
+                            : 'border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold text-white">
+                              {
+                                account.account_identifier
+                              }
+                            </p>
+
+                            <p className="text-xs text-slate-400">
+                              {
+                                account.game_name
+                              }
+                            </p>
+                          </div>
+
+                          {selectedAccountId ===
+                            account.id && (
+                            <div className="rounded-full bg-blue-600 p-2">
+                              <Check className="h-4 w-4 text-white" />
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  )
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* RIGHT */}
+
+          <div>
+            <Card className="sticky top-8 border-slate-700 bg-slate-800/50">
+              <CardHeader>
+                <CardTitle className="text-white">
+                  Order Summary
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent className="space-y-6">
+                <div>
+                  <p className="text-xs text-slate-400">
+                    Order Cost
+                  </p>
+
+                  <p className="text-3xl font-bold text-blue-400">
+                    {requiredPoints}
+                  </p>
+
+                  <p className="text-xs text-slate-500">
+                    points
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-slate-700/50 p-4">
+                  <p className="text-xs text-slate-400">
+                    Your Balance
+                  </p>
+
+                  <p
+                    className={`text-2xl font-bold ${
+                      hasEnoughPoints
+                        ? 'text-green-400'
+                        : 'text-red-400'
                     }`}
                   >
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <p className="text-white font-semibold">
-                          {
-                            account.account_identifier
-                          }
-                        </p>
+                    {userBalance} points
+                  </p>
+                </div>
 
-                        <p className="text-xs text-slate-400">
-                          {
-                            account.game_name
-                          }
-                        </p>
-                      </div>
-
-                      {selectedAccountId ===
-                        account.id && (
-                        <div className="bg-blue-600 rounded-full p-2">
-                          <Check className="h-4 w-4 text-white" />
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                )
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div>
-          <Card className="bg-slate-800/50 border-slate-700 sticky top-8">
-            <CardHeader>
-              <CardTitle className="text-white">
-                Order Summary
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-6">
-              <div>
-                <p className="text-xs text-slate-400">
-                  Order Cost
-                </p>
-
-                <p className="text-3xl font-bold text-blue-400">
-                  {
-                    requiredPoints
+                <Button
+                  onClick={
+                    handleCreateOrder
                   }
-                </p>
-
-                <p className="text-xs text-slate-500">
-                  points
-                </p>
-              </div>
-
-              <div className="bg-slate-700/50 rounded-lg p-4">
-                <p className="text-xs text-slate-400">
-                  Your Balance
-                </p>
-
-                <p
-                  className={`text-2xl font-bold ${
-                    hasEnoughPoints
-                      ? 'text-green-400'
-                      : 'text-red-400'
-                  }`}
+                  disabled={
+                    submitting ||
+                    !selectedAccountId ||
+                    !hasEnoughPoints
+                  }
+                  className="w-full bg-blue-600 hover:bg-blue-700"
                 >
-                  {userBalance}{' '}
-                  points
-                </p>
-              </div>
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
 
-              <Button
-                onClick={
-                  handleCreateOrder
-                }
-                disabled={
-                  !selectedAccountId ||
-                  !hasEnoughPoints ||
-                  submitting
-                }
-                className="w-full bg-blue-600 hover:bg-blue-700"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-
-                    Creating...
-                  </>
-                ) : (
-                  'Create Order'
-                )}
-              </Button>
-            </CardContent>
-          </Card>
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Order'
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </div>
