@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db'
 import { verifyToken } from '@/lib/auth'
-import { ensureBucket, sanitizeStorageFileName } from '@/lib/storage'
+import {
+  ensureBucket,
+  sanitizeStorageFileName,
+} from '@/lib/storage'
 import { z } from 'zod'
 
 const createProductSchema = z.object({
   game_id: z.string().uuid(),
   category_id: z.string().uuid(),
-  name: z.string().min(1),
+  name: z.string().trim().min(1),
   points_price: z.coerce.number().int().positive(),
   description: z.string().optional(),
 })
@@ -19,19 +22,26 @@ const ALLOWED_IMAGE_TYPES = new Set([
   'image/gif',
 ])
 
-const MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024
+const MAX_IMAGE_SIZE_BYTES =
+  25 * 1024 * 1024
 
 function getAuth(request: NextRequest) {
-  const authHeader = request.headers.get('authorization')
+  const authHeader =
+    request.headers.get('authorization')
 
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (
+    !authHeader ||
+    !authHeader.startsWith('Bearer ')
+  ) {
     return {
       status: 401 as const,
       error: 'Unauthorized',
     }
   }
 
-  const auth = verifyToken(authHeader.substring(7))
+  const token = authHeader.substring(7)
+
+  const auth = verifyToken(token)
 
   if (!auth) {
     return {
@@ -53,107 +63,150 @@ function getAuth(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(
+  request: NextRequest
+) {
   try {
     const authResult = getAuth(request)
 
     if (authResult.status !== 200) {
       return NextResponse.json(
-        { error: authResult.error },
-        { status: authResult.status }
+        {
+          error: authResult.error,
+        },
+        {
+          status: authResult.status,
+        }
       )
     }
 
-    const { data: products, error } = await supabase
-      .from('products')
-      .select(`
-        id,
-        name,
-        description,
-        image_url,
-        points_price,
-        is_active,
-        status,
-        created_at,
-        game_id,
-        category_id,
-        games (
+    const { data: products, error } =
+      await supabase
+        .from('products')
+        .select(`
           id,
-          name
-        ),
-        categories (
-          id,
-          name
-        )
-      `)
-      .order('created_at', { ascending: false })
+          name,
+          description,
+          image_url,
+          points_price,
+          is_active,
+          status,
+          created_at,
+          game_id,
+          category_id,
+
+          games (
+            id,
+            name
+          ),
+
+          categories (
+            id,
+            name
+          )
+        `)
+        .order('created_at', {
+          ascending: false,
+        })
 
     if (error) {
-      console.error('Get products error:', error)
+      console.error(
+        'Get products error:',
+        error
+      )
 
       return NextResponse.json(
-        { error: error.message },
+        {
+          error: error.message,
+        },
         { status: 500 }
       )
     }
 
-    const normalizedProducts = (products ?? []).map(
-      (product: any) => ({
-        id: product.id,
+    const normalizedProducts = (
+      products ?? []
+    ).map((product: any) => ({
+      id: String(product.id),
 
-        name: product.name,
+      name: product.name,
 
-        description: product.description,
+      description:
+        product.description,
 
-        image_url: product.image_url,
+      image_url:
+        product.image_url,
 
-        points_price: product.points_price,
+      points_price:
+        product.points_price,
 
-        is_active: product.is_active,
+      is_active:
+        product.is_active,
 
-        status: product.status ?? 'approved',
+      status:
+        product.status ??
+        'approved',
 
-        created_at: product.created_at,
+      created_at:
+        product.created_at,
 
-        game_id: product.game_id,
+      game_id:
+        product.game_id,
 
-        game_name: product.games?.name ?? '',
+      game_name:
+        product.games?.name ??
+        '',
 
-        category_id: product.category_id,
+      category_id:
+        product.category_id,
 
-        category_name:
-          product.categories?.name ?? '',
-      })
-    )
+      category_name:
+        product.categories?.name ??
+        '',
+    }))
 
     return NextResponse.json({
       success: true,
       products: normalizedProducts,
     })
   } catch (error) {
-    console.error('Get products error:', error)
+    console.error(
+      'Get products error:',
+      error
+    )
 
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error:
+          'Internal server error',
+      },
       { status: 500 }
     )
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest
+) {
   try {
     const authResult = getAuth(request)
 
     if (authResult.status !== 200) {
       return NextResponse.json(
-        { error: authResult.error },
-        { status: authResult.status }
+        {
+          error: authResult.error,
+        },
+        {
+          status: authResult.status,
+        }
       )
     }
 
     if (!supabaseAdmin) {
       return NextResponse.json(
-        { error: 'Storage not configured' },
+        {
+          error:
+            'Storage not configured',
+        },
         { status: 500 }
       )
     }
@@ -164,30 +217,40 @@ export async function POST(request: NextRequest) {
       '25MB'
     )
 
-    const formData = await request.formData()
+    const formData =
+      await request.formData()
 
-    const imageFile = formData.get('image_file')
+    const imageFile =
+      formData.get('image_file')
 
-    const parsed = createProductSchema.parse({
-      game_id: String(
-        formData.get('game_id') || ''
-      ),
+    const parsed =
+      createProductSchema.parse({
+        game_id: String(
+          formData.get('game_id') ||
+            ''
+        ),
 
-      category_id: String(
-        formData.get('category_id') || ''
-      ),
+        category_id: String(
+          formData.get(
+            'category_id'
+          ) || ''
+        ),
 
-      name: String(
-        formData.get('name') || ''
-      ),
+        name: String(
+          formData.get('name') || ''
+        ),
 
-      points_price:
-        formData.get('points_price'),
+        points_price:
+          formData.get(
+            'points_price'
+          ),
 
-      description: String(
-        formData.get('description') || ''
-      ),
-    })
+        description: String(
+          formData.get(
+            'description'
+          ) || ''
+        ),
+      })
 
     const {
       game_id,
@@ -197,10 +260,88 @@ export async function POST(request: NextRequest) {
       description,
     } = parsed
 
-    if (!(imageFile instanceof File)) {
+    /*
+      Validate game exists
+    */
+
+    const {
+      data: gameExists,
+      error: gameError,
+    } = await supabase
+      .from('games')
+      .select('id')
+      .eq('id', game_id)
+      .single()
+
+    if (
+      gameError ||
+      !gameExists
+    ) {
       return NextResponse.json(
         {
-          error: 'Image is required',
+          error: 'Game not found',
+        },
+        { status: 404 }
+      )
+    }
+
+    /*
+      Validate category exists
+    */
+
+    const {
+      data: categoryExists,
+      error: categoryError,
+    } = await supabase
+      .from('categories')
+      .select(`
+        id,
+        game_id
+      `)
+      .eq('id', category_id)
+      .single()
+
+    if (
+      categoryError ||
+      !categoryExists
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Category not found',
+        },
+        { status: 404 }
+      )
+    }
+
+    /*
+      Validate category belongs to game
+    */
+
+    if (
+      categoryExists.game_id !==
+      game_id
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Category does not belong to selected game',
+        },
+        { status: 400 }
+      )
+    }
+
+    /*
+      Validate image
+    */
+
+    if (
+      !(imageFile instanceof File)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Image is required',
         },
         { status: 400 }
       )
@@ -233,6 +374,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    /*
+      Upload image
+    */
+
     const fileName =
       sanitizeStorageFileName(
         imageFile.name
@@ -240,7 +385,8 @@ export async function POST(request: NextRequest) {
 
     const storagePath = `products/${Date.now()}-${fileName}`
 
-    const bytes = await imageFile.arrayBuffer()
+    const bytes =
+      await imageFile.arrayBuffer()
 
     const uploadResult =
       await supabaseAdmin.storage
@@ -255,49 +401,72 @@ export async function POST(request: NextRequest) {
         )
 
     if (uploadResult.error) {
+      console.error(
+        'Upload error:',
+        uploadResult.error
+      )
+
       return NextResponse.json(
         {
           error:
-            uploadResult.error.message,
+            uploadResult.error
+              .message,
         },
         { status: 500 }
       )
     }
 
-    const { data: publicUrlData } =
+    const {
+      data: publicUrlData,
+    } =
       supabaseAdmin.storage
         .from('products')
-        .getPublicUrl(storagePath)
+        .getPublicUrl(
+          storagePath
+        )
 
     const image_url =
       publicUrlData.publicUrl
 
-    const { data: product, error } =
-      await supabase
-        .from('products')
-        .insert({
-          game_id,
-          category_id,
-          name,
-          points_price,
-          description:
-            description || null,
-          image_url,
-          type: 'admin',
-          status: 'approved',
-        })
-        .select()
-        .single()
+    /*
+      Create product
+    */
 
-    if (error) {
+    const {
+      data: product,
+      error: createError,
+    } = await supabase
+      .from('products')
+      .insert({
+        game_id,
+        category_id,
+        name,
+        points_price,
+
+        description:
+          description || null,
+
+        image_url,
+
+        type: 'admin',
+
+        status: 'approved',
+
+        is_active: true,
+      })
+      .select()
+      .single()
+
+    if (createError) {
       console.error(
         'Create product error:',
-        error
+        createError
       )
 
       return NextResponse.json(
         {
-          error: error.message,
+          error:
+            createError.message,
         },
         { status: 500 }
       )
@@ -314,8 +483,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         {
-          error: 'Validation error',
-          details: error.errors,
+          error:
+            'Validation error',
+
+          details:
+            error.errors,
         },
         { status: 400 }
       )
@@ -327,7 +499,10 @@ export async function POST(request: NextRequest) {
     )
 
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error:
+          'Internal server error',
+      },
       { status: 500 }
     )
   }
