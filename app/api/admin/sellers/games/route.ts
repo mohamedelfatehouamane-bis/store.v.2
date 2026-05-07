@@ -1,229 +1,346 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer as supabase } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { z } from 'zod';
+import { NextRequest, NextResponse } from 'next/server'
+import { supabaseServer as supabase } from '@/lib/db'
+import { verifyToken } from '@/lib/auth'
 
-const assignCategorySchema = z.object({
-  user_id: z.string().uuid(),
-  category_id: z.string().uuid(),
-});
-
-function requireAdmin(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return {
-      auth: null,
-      error: NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      ),
-    };
-  }
-
-  const token = authHeader.substring(7);
-  const auth = verifyToken(token);
-
-  if (!auth || auth.role !== 'admin') {
-    return {
-      auth: null,
-      error: NextResponse.json(
-        { error: 'Only admins can manage seller categories' },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return { auth, error: null };
+function isUUID(value: string) {
+  return /^[0-9a-fA-F-]{36}$/.test(value)
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const { error: authError } = requireAdmin(request);
+    const authHeader =
+      request.headers.get(
+        'authorization'
+      )
 
-    if (authError) return authError;
-
-    const { searchParams } = new URL(request.url);
-
-    const userId = searchParams.get('user_id');
-
-    if (!userId) {
+    if (
+      !authHeader ||
+      !authHeader.startsWith(
+        'Bearer '
+      )
+    ) {
       return NextResponse.json(
-        { error: 'user_id is required' },
+        {
+          error:
+            'Unauthorized',
+        },
+        { status: 401 }
+      )
+    }
+
+    const token =
+      authHeader.substring(7)
+
+    const auth =
+      verifyToken(token)
+
+    if (
+      !auth ||
+      auth.role !== 'admin'
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Admin only',
+        },
+        { status: 403 }
+      )
+    }
+
+    const { searchParams } =
+      new URL(request.url)
+
+    const sellerId =
+      searchParams.get(
+        'sellerId'
+      )
+
+    if (
+      !sellerId ||
+      !isUUID(sellerId)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid seller id',
+        },
         { status: 400 }
-      );
+      )
     }
 
-    // Get all active categories
-    const { data: allCategories, error: categoriesError } =
-      await supabase
-        .from('categories')
-        .select(`
+    // ============================================
+    // LOAD ASSIGNED CATEGORIES
+    // ============================================
+
+    const {
+      data: assignments,
+      error:
+        assignmentsError,
+    } = await supabase
+      .from(
+        'seller_categories'
+      )
+      .select(`
+        category_id
+      `)
+      .eq(
+        'seller_id',
+        sellerId
+      )
+
+    if (
+      assignmentsError
+    ) {
+      console.error(
+        assignmentsError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            assignmentsError.message,
+        },
+        { status: 500 }
+      )
+    }
+
+    const categoryIds =
+      (
+        assignments ?? []
+      ).map(
+        (item: any) =>
+          item.category_id
+      )
+
+    // ============================================
+    // LOAD CATEGORIES
+    // ============================================
+
+    const {
+      data: categories,
+      error:
+        categoriesError,
+    } = await supabase
+      .from('categories')
+      .select(`
+        id,
+        name,
+        game_id,
+        games (
           id,
-          name,
-          description,
-          game_id
-        `)
-        .eq('is_active', true)
-        .order('name', { ascending: true });
+          name
+        )
+      `)
+      .order('name')
 
-    if (categoriesError) {
+    if (
+      categoriesError
+    ) {
+      console.error(
+        categoriesError
+      )
+
       return NextResponse.json(
-        { error: categoriesError.message },
+        {
+          error:
+            categoriesError.message,
+        },
         { status: 500 }
-      );
+      )
     }
-
-    // Get seller assigned categories
-    const { data: assignedCategories, error: assignedError } =
-      await supabase
-        .from('seller_categories')
-        .select('category_id')
-        .eq('seller_id', userId);
-
-    if (assignedError) {
-      return NextResponse.json(
-        { error: assignedError.message },
-        { status: 500 }
-      );
-    }
-
-    const assignedCategoryIds =
-      assignedCategories?.map(
-        (row: any) => row.category_id
-      ) || [];
 
     return NextResponse.json({
       success: true,
-      categories: (allCategories || []).map(
-        (category: any) => ({
-          ...category,
-          assigned: assignedCategoryIds.includes(
-            category.id
-          ),
-        })
-      ),
-    });
+
+      categories:
+        (
+          categories ??
+          []
+        ).map(
+          (
+            category: any
+          ) => ({
+            id: category.id,
+
+            name:
+              category.name,
+
+            game_id:
+              category.game_id,
+
+            game_name:
+              category.games
+                ?.name ??
+              'Unknown',
+
+            assigned:
+              categoryIds.includes(
+                category.id
+              ),
+          })
+        ),
+    })
   } catch (error) {
-    console.error('GET seller categories error:', error);
+    console.error(error)
 
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error:
+          'Internal server error',
+      },
       { status: 500 }
-    );
+    )
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { error: authError } = requireAdmin(request);
+    const authHeader =
+      request.headers.get(
+        'authorization'
+      )
 
-    if (authError) return authError;
-
-    const body = await request.json();
-
-    const { user_id, category_id } =
-      assignCategorySchema.parse(body);
-
-    const { error: insertError } =
-      await supabase
-        .from('seller_categories')
-        .insert({
-          seller_id: user_id,
-          category_id,
-        });
-
-    if (insertError) {
-      if (insertError.code === '23505') {
-        return NextResponse.json(
-          {
-            error:
-              'Category already assigned to this seller',
-          },
-          { status: 409 }
-        );
-      }
-
-      return NextResponse.json(
-        { error: insertError.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(
-      {
-        success: true,
-        message: 'Category assigned successfully',
-      },
-      { status: 201 }
-    );
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        {
-          error: 'Validation error',
-          details: error.errors,
-        },
-        { status: 400 }
-      );
-    }
-
-    console.error('Assign category error:', error);
-
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function DELETE(request: NextRequest) {
-  try {
-    const { error: authError } = requireAdmin(request);
-
-    if (authError) return authError;
-
-    const { searchParams } = new URL(request.url);
-
-    const userId = searchParams.get('user_id');
-
-    const categoryId =
-      searchParams.get('category_id');
-
-    if (!userId || !categoryId) {
+    if (
+      !authHeader ||
+      !authHeader.startsWith(
+        'Bearer '
+      )
+    ) {
       return NextResponse.json(
         {
           error:
-            'user_id and category_id are required',
+            'Unauthorized',
         },
-        { status: 400 }
-      );
+        { status: 401 }
+      )
     }
 
-    const { error: deleteError } =
-      await supabase
-        .from('seller_categories')
-        .delete()
-        .eq('seller_id', userId)
-        .eq('category_id', categoryId);
+    const token =
+      authHeader.substring(7)
+
+    const auth =
+      verifyToken(token)
+
+    if (
+      !auth ||
+      auth.role !== 'admin'
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Admin only',
+        },
+        { status: 403 }
+      )
+    }
+
+    const body =
+      await request.json()
+
+    const sellerId =
+      body.seller_id
+
+    const categoryIds =
+      body.category_ids ?? []
+
+    if (
+      !sellerId ||
+      !isUUID(sellerId)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid seller id',
+        },
+        { status: 400 }
+      )
+    }
+
+    // ============================================
+    // DELETE OLD ASSIGNMENTS
+    // ============================================
+
+    const {
+      error: deleteError,
+    } = await supabase
+      .from(
+        'seller_categories'
+      )
+      .delete()
+      .eq(
+        'seller_id',
+        sellerId
+      )
 
     if (deleteError) {
+      console.error(
+        deleteError
+      )
+
       return NextResponse.json(
-        { error: deleteError.message },
+        {
+          error:
+            deleteError.message,
+        },
         { status: 500 }
-      );
+      )
+    }
+
+    // ============================================
+    // INSERT NEW ASSIGNMENTS
+    // ============================================
+
+    if (
+      categoryIds.length > 0
+    ) {
+      const rows =
+        categoryIds.map(
+          (
+            categoryId: string
+          ) => ({
+            seller_id:
+              sellerId,
+
+            category_id:
+              categoryId,
+          })
+        )
+
+      const {
+        error: insertError,
+      } = await supabase
+        .from(
+          'seller_categories'
+        )
+        .insert(rows)
+
+      if (insertError) {
+        console.error(
+          insertError
+        )
+
+        return NextResponse.json(
+          {
+            error:
+              insertError.message,
+          },
+          { status: 500 }
+        )
+      }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Category unassigned successfully',
-    });
+    })
   } catch (error) {
-    console.error('Delete category error:', error);
+    console.error(error)
 
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error:
+          'Internal server error',
+      },
       { status: 500 }
-    );
+    )
   }
 }
