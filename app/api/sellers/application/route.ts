@@ -5,138 +5,435 @@ import { z } from 'zod'
 
 const sellerApplicationSchema = z.object({
   business_name: z.string().trim().optional(),
-  business_description: z.string().trim().min(1),
-  game_ids: z.array(z.string().trim().min(1)).min(1),
+
+  business_description: z
+    .string()
+    .trim()
+    .min(1),
+
+  // NEW LOGIC
+  category_ids: z
+    .array(z.string().uuid())
+    .min(1),
 })
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest
+) {
   try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // =====================================================
+    // AUTH
+    // =====================================================
+
+    const authHeader =
+      request.headers.get(
+        'authorization'
+      )
+
+    if (
+      !authHeader ||
+      !authHeader.startsWith(
+        'Bearer '
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Unauthorized',
+        },
+        { status: 401 }
+      )
     }
 
-    const token = authHeader.substring(7)
-    const auth = verifyToken(token)
+    const token =
+      authHeader.substring(7)
+
+    const auth =
+      verifyToken(token)
+
     if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json(
+        {
+          error:
+            'Unauthorized',
+        },
+        { status: 401 }
+      )
     }
 
-    const body = await request.json()
-    const payload = sellerApplicationSchema.parse(body)
+    // =====================================================
+    // BODY
+    // =====================================================
 
-    const { data: user, error: userError } = await supabase
+    const body =
+      await request.json()
+
+    const payload =
+      sellerApplicationSchema.parse(
+        body
+      )
+
+    // =====================================================
+    // USER
+    // =====================================================
+
+    const {
+      data: user,
+      error: userError,
+    } = await supabase
       .from('users')
-      .select('id, role')
+      .select(`
+        id,
+        role,
+        status
+      `)
       .eq('id', auth.id)
       .single()
 
-    if (userError || !user) {
-      console.error('Seller application user lookup error:', userError)
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    if (
+      userError ||
+      !user
+    ) {
+      console.error(
+        'Seller application user lookup error:',
+        userError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            'User not found',
+        },
+        { status: 404 }
+      )
     }
 
-    const { data: validGames, error: gamesError } = await supabase
-      .from('games')
+    // =====================================================
+    // VALIDATE CATEGORIES
+    // =====================================================
+
+    const {
+      data: validCategories,
+      error:
+        categoriesError,
+    } = await supabase
+      .from('categories')
       .select('id')
-      .in('id', payload.game_ids)
+      .in(
+        'id',
+        payload.category_ids
+      )
 
-    if (gamesError) {
-      console.error('Seller application game lookup error:', gamesError)
-      return NextResponse.json({ error: 'Unable to validate selected games' }, { status: 500 })
+    if (
+      categoriesError
+    ) {
+      console.error(
+        'Category validation error:',
+        categoriesError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            'Unable to validate selected categories',
+        },
+        { status: 500 }
+      )
     }
 
-    const validGameIds = (validGames ?? []).map((game: any) => game.id)
-    if (validGameIds.length !== payload.game_ids.length) {
-      return NextResponse.json({ error: 'One or more selected games are invalid' }, { status: 400 })
+    const validCategoryIds =
+      (
+        validCategories ??
+        []
+      ).map(
+        (category: any) =>
+          category.id
+      )
+
+    if (
+      validCategoryIds.length !==
+      payload.category_ids.length
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'One or more selected categories are invalid',
+        },
+        { status: 400 }
+      )
     }
 
-    const { data: existingSeller, error: sellerLookupError } = await supabase
+    // =====================================================
+    // CHECK EXISTING SELLER
+    // =====================================================
+
+    const {
+      data:
+        existingSeller,
+      error:
+        sellerLookupError,
+    } = await supabase
       .from('sellers')
       .select('id')
-      .eq('user_id', auth.id)
+      .eq(
+        'user_id',
+        auth.id
+      )
       .maybeSingle()
 
-    if (sellerLookupError) {
-      console.error('Seller lookup error:', sellerLookupError)
-      return NextResponse.json({ error: 'Unable to process seller profile' }, { status: 500 })
+    if (
+      sellerLookupError
+    ) {
+      console.error(
+        'Seller lookup error:',
+        sellerLookupError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            'Unable to process seller profile',
+        },
+        { status: 500 }
+      )
     }
 
-    let sellerId = existingSeller?.id
+    // =====================================================
+    // CREATE / UPDATE SELLER PROFILE
+    // =====================================================
+
+    let sellerId =
+      existingSeller?.id
+
     if (!sellerId) {
-      const { data: insertResult, error: insertError } = await supabase
+      const {
+        data: insertResult,
+        error: insertError,
+      } = await supabase
         .from('sellers')
         .insert({
-          user_id: auth.id,
-          business_name: payload.business_name ?? null,
-          business_description: payload.business_description,
-          verification_status: 'pending',
-          rejection_reason: null,
+          user_id:
+            auth.id,
+
+          business_name:
+            payload.business_name ??
+            null,
+
+          business_description:
+            payload.business_description,
         })
         .select('id')
         .single()
 
-      if (insertError || !insertResult) {
-        console.error('Seller creation error:', insertError)
-        return NextResponse.json({ error: 'Unable to create seller profile' }, { status: 500 })
+      if (
+        insertError ||
+        !insertResult
+      ) {
+        console.error(
+          'Seller creation error:',
+          insertError
+        )
+
+        return NextResponse.json(
+          {
+            error:
+              'Unable to create seller profile',
+          },
+          { status: 500 }
+        )
       }
 
-      sellerId = insertResult.id
+      sellerId =
+        insertResult.id
     } else {
-      const { error: updateError } = await supabase
+      const {
+        error:
+          updateError,
+      } = await supabase
         .from('sellers')
         .update({
-          business_name: payload.business_name ?? null,
-          business_description: payload.business_description,
-          verification_status: 'pending',
-          rejection_reason: null,
+          business_name:
+            payload.business_name ??
+            null,
+
+          business_description:
+            payload.business_description,
         })
-        .eq('id', sellerId)
+        .eq(
+          'id',
+          sellerId
+        )
 
-      if (updateError) {
-        console.error('Seller update error:', updateError)
-        return NextResponse.json({ error: 'Unable to update seller profile' }, { status: 500 })
+      if (
+        updateError
+      ) {
+        console.error(
+          'Seller update error:',
+          updateError
+        )
+
+        return NextResponse.json(
+          {
+            error:
+              'Unable to update seller profile',
+          },
+          { status: 500 }
+        )
       }
     }
 
-    if (user.role !== 'seller') {
-      const { error: roleUpdateError } = await supabase
-        .from('users')
-        .update({ role: 'seller', is_verified: false })
-        .eq('id', auth.id)
+    // =====================================================
+    // UPDATE USER ROLE
+    // =====================================================
 
-      if (roleUpdateError) {
-        console.error('Seller role update error:', roleUpdateError)
-        return NextResponse.json({ error: 'Unable to set seller role' }, { status: 500 })
-      }
+    const {
+      error:
+        roleUpdateError,
+    } = await supabase
+      .from('users')
+      .update({
+        role: 'seller',
+
+        // NEW SYSTEM
+        status:
+          'pending',
+      })
+      .eq('id', auth.id)
+
+    if (
+      roleUpdateError
+    ) {
+      console.error(
+        'Seller role update error:',
+        roleUpdateError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            'Unable to set seller role',
+        },
+        { status: 500 }
+      )
     }
 
-    const { error: deleteError } = await supabase
-      .from('seller_games')
+    // =====================================================
+    // REMOVE OLD ASSIGNMENTS
+    // =====================================================
+
+    const {
+      error:
+        deleteError,
+    } = await supabase
+      .from(
+        'seller_categories'
+      )
       .delete()
-      .eq('seller_id', sellerId)
+      .eq(
+        'seller_id',
+        auth.id
+      )
 
-    if (deleteError) {
-      console.error('Seller game cleanup error:', deleteError)
-      return NextResponse.json({ error: 'Unable to update seller game selections' }, { status: 500 })
+    if (
+      deleteError
+    ) {
+      console.error(
+        'Seller category cleanup error:',
+        deleteError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            'Unable to update seller categories',
+        },
+        { status: 500 }
+      )
     }
 
-    const assignments = validGameIds.map((gameId) => ({ seller_id: sellerId, game_id: gameId }))
-    const { error: assignError } = await supabase
-      .from('seller_games')
-      .insert(assignments)
+    // =====================================================
+    // INSERT NEW ASSIGNMENTS
+    // =====================================================
 
-    if (assignError) {
-      console.error('Seller game assignment error:', assignError)
-      return NextResponse.json({ error: 'Unable to save selected games' }, { status: 500 })
+    const assignments =
+      validCategoryIds.map(
+        (
+          categoryId
+        ) => ({
+          seller_id:
+            auth.id,
+
+          category_id:
+            categoryId,
+        })
+      )
+
+    const {
+      error:
+        assignError,
+    } = await supabase
+      .from(
+        'seller_categories'
+      )
+      .insert(
+        assignments
+      )
+
+    if (
+      assignError
+    ) {
+      console.error(
+        'Seller category assignment error:',
+        assignError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            'Unable to save selected categories',
+        },
+        { status: 500 }
+      )
     }
 
-    return NextResponse.json({ success: true, message: 'Seller application submitted for review' })
+    // =====================================================
+    // SUCCESS
+    // =====================================================
+
+    return NextResponse.json({
+      success: true,
+
+      message:
+        'Seller application submitted for review',
+    })
   } catch (error) {
-    console.error('Seller application error:', error)
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: 'Validation error', details: error.errors }, { status: 400 })
+    console.error(
+      'Seller application error:',
+      error
+    )
+
+    if (
+      error instanceof
+      z.ZodError
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Validation error',
+
+          details:
+            error.errors,
+        },
+        { status: 400 }
+      )
     }
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+
+    return NextResponse.json(
+      {
+        error:
+          'Internal server error',
+      },
+      { status: 500 }
+    )
   }
 }
