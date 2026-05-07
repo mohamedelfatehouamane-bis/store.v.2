@@ -1,196 +1,495 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer as supabase, supabaseAdmin } from '@/lib/db';
-import { verifyToken, resolveUserId } from '@/lib/auth';
-import { telegramService } from '@/lib/telegram-service';
-import { addOrderEvent } from '@/lib/order-events';
-import { z } from 'zod';
+import { NextRequest, NextResponse } from 'next/server'
 
-const pickOrderSchema = z.object({
-  order_id: z.string().min(1),
-});
+import {
+  supabaseServer as supabase,
+  supabaseAdmin,
+} from '@/lib/db'
 
-export async function POST(request: NextRequest) {
+import {
+  verifyToken,
+  resolveUserId,
+} from '@/lib/auth'
+
+import { telegramService } from '@/lib/telegram-service'
+
+import { addOrderEvent } from '@/lib/order-events'
+
+import { z } from 'zod'
+
+const pickOrderSchema =
+  z.object({
+    order_id:
+      z.string().uuid(),
+  })
+
+function isUUID(
+  value: string
+) {
+  return /^[0-9a-fA-F-]{36}$/.test(
+    value
+  )
+}
+
+export async function POST(
+  request: NextRequest
+) {
   try {
-    const authHeader = request.headers.get('authorization');
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // =====================================================
+    // AUTH
+    // =====================================================
+
+    const authHeader =
+      request.headers.get(
+        'authorization'
+      )
+
+    if (
+      !authHeader ||
+      !authHeader.startsWith(
+        'Bearer '
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Unauthorized',
+        },
+        { status: 401 }
+      )
     }
 
-    const token = authHeader.substring(7);
-    const auth = verifyToken(token);
+    const token =
+      authHeader.substring(7)
 
-    if (!auth || auth.role !== 'seller') {
-      return NextResponse.json({ error: 'Only sellers can pick orders' }, { status: 403 });
+    const auth =
+      verifyToken(token)
+
+    if (
+      !auth ||
+      auth.role !== 'seller'
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Only sellers can pick orders',
+        },
+        { status: 403 }
+      )
     }
 
-    const body = await request.json();
-    const { order_id } = pickOrderSchema.parse(body);
+    // =====================================================
+    // BODY
+    // =====================================================
 
-    const db = supabaseAdmin ?? supabase;
+    const body =
+      await request.json()
 
-    // Resolve the correct public.users.id from the DB so all seller lookups
-    // and order assignments use the correct DB row ID.
-    const resolvedUserId = await resolveUserId(auth, db);
+    const {
+      order_id,
+    } =
+      pickOrderSchema.parse(
+        body
+      )
 
-    const { data: order, error: orderError } = await db
+    if (
+      !isUUID(order_id)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid order id',
+        },
+        { status: 400 }
+      )
+    }
+
+    const db =
+      supabaseAdmin ??
+      supabase
+
+    // =====================================================
+    // RESOLVE USER
+    // =====================================================
+
+    const resolvedUserId =
+      await resolveUserId(
+        auth,
+        db
+      )
+
+    // =====================================================
+    // USER
+    // =====================================================
+
+    const {
+      data: sellerUser,
+      error:
+        sellerUserError,
+    } = await db
+      .from('users')
+      .select(`
+        id,
+        role,
+        status
+      `)
+      .eq(
+        'id',
+        resolvedUserId
+      )
+      .single()
+
+    if (
+      sellerUserError ||
+      !sellerUser
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Seller not found',
+        },
+        { status: 404 }
+      )
+    }
+
+    if (
+      sellerUser.status !==
+      'approved'
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Only approved sellers can pick orders',
+        },
+        { status: 403 }
+      )
+    }
+
+    // =====================================================
+    // ORDER
+    // =====================================================
+
+    const {
+      data: order,
+      error: orderError,
+    } = await db
       .from('orders')
-      .select('id, status, assigned_seller_id, points_amount, customer_id, offer_id')
-      .eq('id', order_id)
-      .maybeSingle();
+      .select(`
+        id,
+        status,
+        assigned_seller_id,
+        points_amount,
+        customer_id,
+        category_id,
+        product_id
+      `)
+      .eq(
+        'id',
+        order_id
+      )
+      .maybeSingle()
 
-    if (orderError || !order) {
-      return NextResponse.json({ error: 'Order not found or already picked' }, { status: 404 });
-    }
-
-    if (order.status !== 'open' || order.assigned_seller_id) {
-      return NextResponse.json({ error: 'Order was already picked by another seller' }, { status: 409 });
-    }
-
-    const { data: seller, error: sellerError } = await db
-      .from('sellers')
-      .select('id, verification_status')
-      .eq('user_id', resolvedUserId)
-      .maybeSingle();
-
-    if (sellerError || !seller) {
-      return NextResponse.json({ error: 'Seller profile not found' }, { status: 403 });
-    }
-
-    if (seller.verification_status !== 'verified' && seller.verification_status !== 'approved') {
+    if (
+      orderError ||
+      !order
+    ) {
       return NextResponse.json(
-        { error: 'Only verified sellers can pick orders' },
-        { status: 403 }
-      );
+        {
+          error:
+            'Order not found',
+        },
+        { status: 404 }
+      )
     }
 
-    if (!order.offer_id) {
+    if (
+      order.status !==
+        'pending' ||
+      order.assigned_seller_id
+    ) {
       return NextResponse.json(
-        { error: 'This order cannot be picked by sellers' },
-        { status: 403 }
-      );
+        {
+          error:
+            'Order already picked',
+        },
+        { status: 409 }
+      )
     }
 
-    const { data: offer, error: offerError } = await db
-      .from('offers')
-      .select('id, product_id')
-      .eq('id', order.offer_id)
-      .maybeSingle();
+    // =====================================================
+    // CATEGORY VALIDATION
+    // =====================================================
 
-    if (offerError || !offer?.product_id) {
-      return NextResponse.json({ error: 'Order offer is invalid' }, { status: 400 });
-    }
-
-    const { data: product, error: productError } = await db
-      .from('products')
-      .select('id, game_id, category_id')
-      .eq('id', offer.product_id)
-      .maybeSingle();
-
-    if (productError || !product?.category_id || !product?.game_id) {
-      return NextResponse.json({ error: 'Order category is invalid' }, { status: 400 });
-    }
-
-    const { data: sellerCategory, error: sellerCategoryError } = await db
-      .from('seller_categories')
-      .select('id')
-      .eq('seller_id', resolvedUserId)
-      .eq('game_id', product.game_id)
-      .eq('category_id', product.category_id)
-      .maybeSingle();
-
-    if (sellerCategoryError) {
-      return NextResponse.json({ error: sellerCategoryError.message }, { status: 500 });
-    }
-
-    if (!sellerCategory) {
+    if (
+      !order.category_id ||
+      !isUUID(
+        order.category_id
+      )
+    ) {
       return NextResponse.json(
-        { error: 'You are not assigned to this order category' },
-        { status: 403 }
-      );
+        {
+          error:
+            'Invalid order category',
+        },
+        { status: 400 }
+      )
     }
 
-    const { data: pickedOrder, error: pickError } = await db
+    // =====================================================
+    // SELLER CATEGORY ACCESS
+    // =====================================================
+
+    const {
+      data:
+        sellerCategory,
+      error:
+        sellerCategoryError,
+    } = await db
+      .from(
+        'seller_categories'
+      )
+      .select(`
+        seller_id,
+        category_id
+      `)
+      .eq(
+        'seller_id',
+        resolvedUserId
+      )
+      .eq(
+        'category_id',
+        order.category_id
+      )
+      .maybeSingle()
+
+    if (
+      sellerCategoryError
+    ) {
+      console.error(
+        sellerCategoryError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            sellerCategoryError.message,
+        },
+        { status: 500 }
+      )
+    }
+
+    if (
+      !sellerCategory
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'You are not assigned to this category',
+        },
+        { status: 403 }
+      )
+    }
+
+    // =====================================================
+    // PICK ORDER
+    // =====================================================
+
+    const {
+      data: pickedOrder,
+      error: pickError,
+    } = await db
       .from('orders')
       .update({
-        assigned_seller_id: resolvedUserId,
-        status: 'in_progress',
-        picked_at: new Date().toISOString(),
-      })
-      .eq('id', order_id)
-      .eq('status', 'open')
-      .is('assigned_seller_id', null)
-      .select('id, points_amount')
-      .maybeSingle();
+        assigned_seller_id:
+          resolvedUserId,
 
-    if (pickError || !pickedOrder) {
-      return NextResponse.json({ error: 'Order was already picked by another seller' }, { status: 409 });
+        status:
+          'in_progress',
+
+        picked_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        'id',
+        order_id
+      )
+      .eq(
+        'status',
+        'pending'
+      )
+      .is(
+        'assigned_seller_id',
+        null
+      )
+      .select(`
+        id,
+        points_amount
+      `)
+      .maybeSingle()
+
+    if (
+      pickError ||
+      !pickedOrder
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Order already picked',
+        },
+        { status: 409 }
+      )
     }
 
-    // Seller gets full order amount; fees are handled on customer side.
-    const gross = Number(pickedOrder.points_amount ?? order.points_amount ?? 0);
-    const seller_earnings = gross;
+    // =====================================================
+    // SELLER EARNINGS
+    // =====================================================
+
+    const gross =
+      Number(
+        pickedOrder.points_amount ??
+          order.points_amount ??
+          0
+      )
+
+    const seller_earnings =
+      gross
 
     await db
       .from('orders')
-      .update({ seller_earnings })
-      .eq('id', order_id);
+      .update({
+        seller_earnings,
+      })
+      .eq(
+        'id',
+        order_id
+      )
+
+    // =====================================================
+    // LOGS
+    // =====================================================
 
     await db
       .from('order_logs')
       .insert({
         order_id,
-        seller_id: resolvedUserId,
-        action: 'accept',
-        result: 'success',
-        details: { seller_earnings },
-      });
 
-    await addOrderEvent(db, {
-      orderId: order_id,
-      type: 'accepted',
-      message: 'Seller accepted the order',
-      userId: resolvedUserId,
-    })
+        seller_id:
+          resolvedUserId,
 
-    const { data: customer } = await db
+        action:
+          'accept',
+
+        result:
+          'success',
+
+        details: {
+          seller_earnings,
+        },
+      })
+
+    // =====================================================
+    // EVENTS
+    // =====================================================
+
+    await addOrderEvent(
+      db,
+      {
+        orderId:
+          order_id,
+
+        type:
+          'accepted',
+
+        message:
+          'Seller accepted the order',
+
+        userId:
+          resolvedUserId,
+      }
+    )
+
+    // =====================================================
+    // TELEGRAM
+    // =====================================================
+
+    const {
+      data: customer,
+    } = await db
       .from('users')
-      .select('telegram_id')
-      .eq('id', order.customer_id)
-      .maybeSingle();
+      .select(`
+        telegram_id
+      `)
+      .eq(
+        'id',
+        order.customer_id
+      )
+      .maybeSingle()
 
-    if (customer?.telegram_id) {
+    if (
+      customer?.telegram_id
+    ) {
       void telegramService
         .sendMessage(
           customer.telegram_id,
-          telegramService.orderUpdatedMessage(String(order_id), 'In Progress')
+          telegramService.orderUpdatedMessage(
+            String(order_id),
+            'In Progress'
+          )
         )
         .catch((err) => {
-          console.warn('[Orders][Pick] Telegram notify skipped:', err instanceof Error ? err.message : String(err));
-        });
+          console.warn(
+            '[Orders][Pick] Telegram notify skipped:',
+            err instanceof Error
+              ? err.message
+              : String(err)
+          )
+        })
     }
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
 
     return NextResponse.json(
       {
         success: true,
-        message: 'Order picked successfully',
+
+        message:
+          'Order picked successfully',
+
         order_id,
+
         seller_earnings,
       },
       { status: 200 }
-    );
+    )
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (
+      error instanceof
+      z.ZodError
+    ) {
       return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
+        {
+          error:
+            'Validation error',
+
+          details:
+            error.errors,
+        },
         { status: 400 }
-      );
+      )
     }
 
-    console.error('Pick order error:', error);
+    console.error(
+      'Pick order error:',
+      error
+    )
+
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error:
+          'Internal server error',
+      },
       { status: 500 }
-    );
+    )
   }
 }
