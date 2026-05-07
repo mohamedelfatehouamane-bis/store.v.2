@@ -87,14 +87,36 @@ export async function POST(request: NextRequest) {
 
     // Resolve product for this game (use first product, or create a default one)
     let productId: string;
-    const { data: existingProduct } = await supabase
-      .from('products')
+    const { data: categoryIdsData, error: categoryIdsError } = await supabase
+      .from('categories')
       .select('id')
       .eq('game_id', payload.game_id)
-      .eq('is_active', true)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .order('created_at', { ascending: true });
+
+    if (categoryIdsError) {
+      console.error('Resolve game categories error:', categoryIdsError);
+      return NextResponse.json({ error: 'Failed to resolve game categories' }, { status: 500 });
+    }
+
+    const categoryIds = (categoryIdsData ?? []).map((category: any) => String(category.id));
+    let existingProduct: any = null;
+
+    if (categoryIds.length > 0) {
+      const existingProductResult = await supabase
+        .from('products')
+        .select('id')
+        .in('category_id', categoryIds)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      existingProduct = existingProductResult.data;
+      if (existingProductResult.error) {
+        console.error('Fetch existing product for game categories error:', existingProductResult.error);
+        return NextResponse.json({ error: 'Failed to resolve product for game' }, { status: 500 });
+      }
+    }
 
     if (existingProduct) {
       productId = existingProduct.id;
