@@ -106,9 +106,17 @@ export async function POST(request: NextRequest) {
         .eq('id', payload.game_id)
         .single();
 
+      const { data: category } = await supabase
+        .from('categories')
+        .select('id')
+        .eq('game_id', payload.game_id)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
       const { data: newProduct, error: productError } = await supabase
         .from('products')
-        .insert({ game_id: payload.game_id, name: game?.name ?? 'Default' })
+        .insert({ category_id: category?.id ?? null, name: game?.name ?? 'Default' })
         .select('id')
         .single();
 
