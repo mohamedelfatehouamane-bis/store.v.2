@@ -22,8 +22,8 @@ type UserItem = {
   is_verified: boolean;
   verification_status?: string;
   seller_fee_percentage?: number;
-  assigned_games?: string[];
-  selected_games?: string[];
+  assigned_categories?: string[];
+  selected_categories?: string[];
   rejection_reason?: string | null;
   rating?: number | null;
   total_reviews?: number | null;
@@ -100,16 +100,16 @@ export default function UsersPage() {
           throw new Error(data.error || 'Unable to load users');
         }
         const normalizedUsers: UserItem[] = (data.users ?? []).map((item: UserItem) => {
-          const selectedGames = Array.isArray(item.selected_games)
-            ? item.selected_games
-            : Array.isArray(item.assigned_games)
-            ? item.assigned_games
+          const selectedCategories = Array.isArray(item.selected_categories)
+            ? item.selected_categories
+            : Array.isArray(item.assigned_categories)
+            ? item.assigned_categories
             : [];
 
           return {
             ...item,
-            selected_games: selectedGames,
-            assigned_games: selectedGames,
+            selected_categories: selectedCategories,
+            assigned_categories: selectedCategories,
           };
         });
 
@@ -117,7 +117,7 @@ export default function UsersPage() {
           console.log('[users-page] /api/users response sellers',
             normalizedUsers
               .filter((u) => u.role === 'seller')
-              .map((u) => ({ id: u.id, username: u.username, selected_games: u.selected_games }))
+              .map((u) => ({ id: u.id, username: u.username, selected_categories: u.selected_categories }))
           );
         }
 
