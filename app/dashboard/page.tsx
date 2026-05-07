@@ -1,23 +1,22 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
 
-import { useAuth } from '@/lib/auth-context';
+import { useAuth } from '@/lib/auth-context'
 
 import {
   normalizeStatus,
   ORDER_STATUS,
   isActiveOrderStatus,
-} from '@/lib/order-status';
+} from '@/lib/order-status'
 
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card';
+} from '@/components/ui/card'
 
 import {
   DollarSign,
@@ -28,129 +27,160 @@ import {
   CreditCard,
   Package,
   User,
-} from 'lucide-react';
+  Wallet,
+} from 'lucide-react'
 
 type OrderItem = {
-  id: string;
-  product_name?: string;
-  game_name?: string;
-  status: string;
-  points_price: number;
-  created_at: string;
-  seller_earnings?: number;
-};
+  id: string
+  product_name?: string
+  game_name?: string
+  status: string
+  points_price: number
+  created_at: string
+  seller_earnings?: number
+}
 
 type ProfileData = {
-  total_points: number;
-  status?: string;
-  role?: string;
-};
+  total_points: number
+  points?: number
+  status?: string
+  role?: string
+}
 
-function statusBadgeClass(status: string) {
+function statusBadgeClass(
+  status: string
+) {
   switch (status) {
     case ORDER_STATUS.PENDING:
-      return 'bg-yellow-50 text-yellow-700 border border-yellow-200';
+      return 'bg-yellow-50 text-yellow-700 border border-yellow-200'
 
     case ORDER_STATUS.IN_PROGRESS:
-      return 'bg-blue-50 text-blue-700 border border-blue-200';
+      return 'bg-blue-50 text-blue-700 border border-blue-200'
 
     case ORDER_STATUS.COMPLETED:
-      return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+      return 'bg-emerald-50 text-emerald-700 border border-emerald-200'
 
     case ORDER_STATUS.CANCELLED:
-      return 'bg-red-50 text-red-700 border border-red-200';
+      return 'bg-red-50 text-red-700 border border-red-200'
 
     default:
-      return 'bg-slate-50 text-slate-700 border border-slate-200';
+      return 'bg-slate-50 text-slate-700 border border-slate-200'
   }
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user } = useAuth()
 
   const [profile, setProfile] =
-    useState<ProfileData | null>(null);
+    useState<ProfileData | null>(
+      null
+    )
 
-  const [recentOrders, setRecentOrders] =
-    useState<OrderItem[]>([]);
+  const [
+    recentOrders,
+    setRecentOrders,
+  ] = useState<OrderItem[]>([])
 
-  const [stats, setStats] = useState({
-    totalPoints: 0,
-    activeOrders: 0,
-    completedOrders: 0,
-    revenue: 0,
-  });
+  const [stats, setStats] =
+    useState({
+      totalPoints: 0,
+      activeOrders: 0,
+      completedOrders: 0,
+      revenue: 0,
+    })
 
   const [loading, setLoading] =
-    useState(true);
+    useState(true)
 
   const [error, setError] =
-    useState('');
+    useState('')
 
   const isSeller =
-    user?.role === 'seller';
+    user?.role === 'seller'
 
   const sellerIsApproved =
     user?.role === 'seller' &&
-    profile?.status === 'approved';
+    profile?.status ===
+      'approved'
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) return
 
     const token =
-      localStorage.getItem('auth_token');
+      localStorage.getItem(
+        'auth_token'
+      )
 
     if (!token) {
-      setLoading(false);
-      return;
+      setLoading(false)
+      return
     }
 
     async function loadDashboard() {
       try {
-        const [profileRes, ordersRes] =
-          await Promise.all([
-            fetch('/api/users/profile', {
+        const ordersFilter =
+          user.role === 'seller'
+            ? 'my-tasks'
+            : user.role ===
+                'customer'
+              ? 'my-orders'
+              : ''
+
+        const [
+          profileRes,
+          ordersRes,
+        ] = await Promise.all([
+          fetch(
+            '/api/users/profile',
+            {
               headers: {
                 Authorization: `Bearer ${token}`,
               },
-            }),
+            }
+          ),
 
-            fetch(
-              '/api/orders?filter=my-tasks',
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
-              }
-            ),
-          ]);
+          fetch(
+            `/api/orders${
+              ordersFilter
+                ? `?filter=${ordersFilter}`
+                : ''
+            }`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          ),
+        ])
 
         if (!profileRes.ok) {
           throw new Error(
             'Unable to load profile'
-          );
+          )
         }
 
         if (!ordersRes.ok) {
           throw new Error(
             'Unable to load orders'
-          );
+          )
         }
 
         const profileData =
-          await profileRes.json();
+          await profileRes.json()
 
         const ordersData =
-          await ordersRes.json();
+          await ordersRes.json()
 
         const orders = (
           ordersData.orders ?? []
         ).map((order: any) => ({
           ...order,
-          status: normalizeStatus(
-            order.status
-          ),
-        }));
+
+          status:
+            normalizeStatus(
+              order.status
+            ),
+        }))
 
         const earnings = orders
           .filter(
@@ -159,7 +189,10 @@ export default function DashboardPage() {
               ORDER_STATUS.COMPLETED
           )
           .reduce(
-            (sum: number, o: any) =>
+            (
+              sum: number,
+              o: any
+            ) =>
               sum +
               Number(
                 o.seller_earnings ??
@@ -167,26 +200,32 @@ export default function DashboardPage() {
                   0
               ),
             0
-          );
+          )
 
-        setProfile(profileData.user);
+        setProfile(
+          profileData.user
+        )
 
         setRecentOrders(
           orders.slice(0, 5)
-        );
+        )
 
         setStats({
           totalPoints: Number(
             profileData.user
-              ?.total_points ?? 0
+              ?.points ??
+              profileData.user
+                ?.total_points ??
+              0
           ),
 
-          activeOrders: orders.filter(
-            (o: any) =>
-              isActiveOrderStatus(
-                o.status
-              )
-          ).length,
+          activeOrders:
+            orders.filter(
+              (o: any) =>
+                isActiveOrderStatus(
+                  o.status
+                )
+            ).length,
 
           completedOrders:
             orders.filter(
@@ -196,29 +235,29 @@ export default function DashboardPage() {
             ).length,
 
           revenue: earnings,
-        });
+        })
       } catch (err) {
-        console.error(err);
+        console.error(err)
 
         setError(
           err instanceof Error
             ? err.message
             : 'Failed to load dashboard'
-        );
+        )
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
     }
 
-    loadDashboard();
-  }, [user]);
+    loadDashboard()
+  }, [user])
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-white">
         Loading dashboard...
       </div>
-    );
+    )
   }
 
   return (
@@ -227,11 +266,13 @@ export default function DashboardPage() {
 
       <div className="mb-6 sm:mb-8">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">
-          Welcome back, {user?.username}!
+          Welcome back,{' '}
+          {user?.username}!
         </h1>
 
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 sm:text-base">
-          Manage your dashboard and orders.
+          Manage your dashboard
+          and orders.
         </p>
       </div>
 
@@ -240,20 +281,20 @@ export default function DashboardPage() {
       {isSeller && profile ? (
         sellerIsApproved ? (
           <div className="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">
-            ✅ Your seller account is approved.
-            You can receive orders and manage
-            tasks.
+            ✅ Your seller account
+            is approved.
           </div>
         ) : profile.status ===
           'rejected' ? (
           <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-            ❌ Your seller account was
-            rejected.
+            ❌ Your seller account
+            was rejected.
           </div>
         ) : (
           <div className="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950/40 dark:text-yellow-300">
-            ⏳ Your seller account is waiting
-            for admin approval.
+            ⏳ Your seller account
+            is waiting for admin
+            approval.
           </div>
         )
       ) : null}
@@ -267,15 +308,16 @@ export default function DashboardPage() {
 
         {/* SELLER */}
 
-        {user?.role === 'seller' && (
+        {user?.role ===
+          'seller' && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Link href="/dashboard/earnings">
+            <Link href="/dashboard/withdraw">
               <Card className="cursor-pointer transition hover:border-emerald-500">
                 <CardContent className="flex flex-col items-center justify-center py-6">
-                  <DollarSign className="mb-2 h-6 w-6 text-emerald-500" />
+                  <Wallet className="mb-2 h-6 w-6 text-emerald-500" />
 
                   <span className="font-medium">
-                    Withdraw Earnings
+                    Withdraw
                   </span>
                 </CardContent>
               </Card>
@@ -321,15 +363,16 @@ export default function DashboardPage() {
 
         {/* ADMIN */}
 
-        {user?.role === 'admin' && (
+        {user?.role ===
+          'admin' && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Link href="/dashboard/admin/withdrawals">
               <Card className="cursor-pointer transition hover:border-emerald-500">
                 <CardContent className="flex flex-col items-center justify-center py-6">
-                  <DollarSign className="mb-2 h-6 w-6 text-emerald-500" />
+                  <Wallet className="mb-2 h-6 w-6 text-emerald-500" />
 
                   <span className="font-medium">
-                    Withdrawal Requests
+                    Withdraw Requests
                   </span>
                 </CardContent>
               </Card>
@@ -375,7 +418,8 @@ export default function DashboardPage() {
 
         {/* CUSTOMER */}
 
-        {user?.role === 'customer' && (
+        {user?.role ===
+          'customer' && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Link href="/dashboard/orders">
               <Card className="cursor-pointer transition hover:border-orange-500">
@@ -389,7 +433,7 @@ export default function DashboardPage() {
               </Card>
             </Link>
 
-            <Link href="/shop">
+            <Link href="/dashboard/marketplace">
               <Card className="cursor-pointer transition hover:border-fuchsia-500">
                 <CardContent className="flex flex-col items-center justify-center py-6">
                   <ShoppingBag className="mb-2 h-6 w-6 text-fuchsia-500" />
@@ -434,25 +478,30 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Available Balance
+              {user?.role ===
+              'seller'
+                ? 'Available Balance'
+                : 'Points Balance'}
             </CardTitle>
           </CardHeader>
 
           <CardContent>
             <div className="text-3xl font-bold">
-              {stats.totalPoints} pts
+              {
+                stats.totalPoints
+              }{' '}
+              pts
             </div>
-
-            <p className="text-sm text-muted-foreground">
-              Withdrawable earnings
-            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
             <CardTitle>
-              Lifetime Earnings
+              {user?.role ===
+              'seller'
+                ? 'Lifetime Earnings'
+                : 'Spent Points'}
             </CardTitle>
           </CardHeader>
 
@@ -460,11 +509,6 @@ export default function DashboardPage() {
             <div className="text-3xl font-bold">
               {stats.revenue} pts
             </div>
-
-            <p className="text-sm text-muted-foreground">
-              Total earned from completed
-              orders
-            </p>
           </CardContent>
         </Card>
 
@@ -477,12 +521,10 @@ export default function DashboardPage() {
 
           <CardContent>
             <div className="text-3xl font-bold">
-              {stats.activeOrders}
+              {
+                stats.activeOrders
+              }
             </div>
-
-            <p className="text-sm text-muted-foreground">
-              Orders in progress
-            </p>
           </CardContent>
         </Card>
 
@@ -495,15 +537,13 @@ export default function DashboardPage() {
 
           <CardContent>
             <div className="text-3xl font-bold">
-              {stats.completedOrders}
+              {
+                stats.completedOrders
+              }
             </div>
-
-            <p className="text-sm text-muted-foreground">
-              Successfully delivered
-            </p>
           </CardContent>
         </Card>
       </div>
     </div>
-  );
+  )
 }
