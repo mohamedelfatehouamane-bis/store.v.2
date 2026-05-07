@@ -23,7 +23,6 @@ export async function GET(_request: NextRequest) {
         game_id,
         status,
         approved_at,
-        game:game_id(id, name),
         seller:seller_id(id, username, avatar_url)
         `
       )
@@ -76,6 +75,24 @@ export async function GET(_request: NextRequest) {
       }
     }
 
+    const gameIds = Array.from(
+      new Set((offers ?? []).map((offer: any) => String(offer.game_id ?? '')).filter(Boolean))
+    )
+    let gamesById = new Map<string, any>()
+    if (gameIds.length > 0) {
+      const { data: games, error: gamesError } = await supabase
+        .from('games')
+        .select('id, name')
+        .in('id', gameIds)
+
+      if (gamesError) {
+        console.error('Exclusive offers game lookup error:', gamesError)
+        return NextResponse.json({ error: 'Failed to fetch offers' }, { status: 500 })
+      }
+
+      gamesById = new Map((games ?? []).map((game: any) => [String(game.id), game]))
+    }
+
     const enrichedOffers = (offers ?? []).map((offer: any) => {
       const sellerStats = sellerStatsById.get(String(offer.seller?.id ?? ''))
       const rating = Number(sellerStats?.rating ?? 0)
@@ -106,10 +123,10 @@ export async function GET(_request: NextRequest) {
           dispute_count: disputeCount,
           ...trust,
         },
-        game: offer.game
+        game: offer.game_id
           ? {
-              id: offer.game.id,
-              name: offer.game.name,
+              id: offer.game_id,
+              name: gamesById.get(String(offer.game_id))?.name ?? null,
             }
           : null,
       }
