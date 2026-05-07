@@ -1,172 +1,424 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
-import { normalizeStatus, ORDER_STATUS } from '@/lib/order-status';
-import { useLanguage } from '@/lib/language-context';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
-import Link from 'next/link';
-import { Search, Filter, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react'
+
+import Link from 'next/link'
+
+import { useAuth } from '@/lib/auth-context'
+
+import {
+  normalizeStatus,
+  ORDER_STATUS,
+} from '@/lib/order-status'
+
+import { useLanguage } from '@/lib/language-context'
+
+import {
+  Card,
+  CardContent,
+} from '@/components/ui/card'
+
+import { Button } from '@/components/ui/button'
+
+import { Input } from '@/components/ui/input'
+
+import { Skeleton } from '@/components/ui/skeleton'
+
+import {
+  Search,
+  Filter,
+  ShoppingBag,
+  Wallet,
+  Package,
+  Users,
+  ClipboardList,
+} from 'lucide-react'
 
 type OrderItem = {
-  id: string;
-  product_name: string;
-  game_name: string;
-  status: string;
-  points_price: number;
-  assigned_seller_id?: string | null;
-  created_at: string;
-};
+  id: string
+  product_name: string
+  game_name: string
+  status: string
+  points_amount: number
+  assigned_seller_id?: string | null
+  created_at: string
+}
 
-function getStatusColor(status: string) {
+function getStatusColor(
+  status: string
+) {
   switch (status) {
     case ORDER_STATUS.PENDING:
-      return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+      return 'bg-yellow-50 text-yellow-700 border-yellow-200'
+
     case ORDER_STATUS.IN_PROGRESS:
-      return 'bg-blue-50 text-blue-700 border-blue-200';
+      return 'bg-blue-50 text-blue-700 border-blue-200'
+
     case ORDER_STATUS.COMPLETED:
-      return 'bg-green-50 text-green-700 border-green-200';
+      return 'bg-green-50 text-green-700 border-green-200'
+
     case ORDER_STATUS.CANCELLED:
-      return 'bg-red-50 text-red-700 border-red-200';
+      return 'bg-red-50 text-red-700 border-red-200'
+
     case ORDER_STATUS.DELIVERED:
-      return 'bg-slate-50 text-slate-700 border-slate-200';
+      return 'bg-slate-50 text-slate-700 border-slate-200'
+
     default:
-      return 'bg-slate-50 text-slate-700 border-slate-200';
+      return 'bg-slate-50 text-slate-700 border-slate-200'
   }
 }
 
-function getStatusLabel(status: string) {
-  return status.replace('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+function getStatusLabel(
+  status: string
+) {
+  return status
+    .replace('_', ' ')
+    .replace(
+      /\b\w/g,
+      (char) =>
+        char.toUpperCase()
+    )
 }
 
 export default function OrdersPage() {
-  const { user } = useAuth();
-  const { t } = useLanguage();
-  const [orders, setOrders] = useState<OrderItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { user } =
+    useAuth()
 
-  const orderFilter = user?.role === 'seller' ? 'my-tasks' : user?.role === 'customer' ? 'my-orders' : '';
+  const { t } =
+    useLanguage()
+
+  const [orders, setOrders] =
+    useState<OrderItem[]>([])
+
+  const [
+    searchQuery,
+    setSearchQuery,
+  ] = useState('')
+
+  const [
+    statusFilter,
+    setStatusFilter,
+  ] = useState('all')
+
+  const [loading, setLoading] =
+    useState(false)
+
+  const [error, setError] =
+    useState('')
+
+  const orderFilter =
+    user?.role === 'seller'
+      ? 'my-tasks'
+      : user?.role ===
+          'customer'
+        ? 'my-orders'
+        : ''
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
+    if (!user) return
 
-    const token = localStorage.getItem('auth_token');
+    const token =
+      localStorage.getItem(
+        'auth_token'
+      )
+
     if (!token) {
-      setError('Authentication required');
-      return;
+      setError(
+        'Authentication required'
+      )
+
+      return
     }
 
     async function loadOrders() {
-      setLoading(true);
-      setError('');
+      setLoading(true)
+
+      setError('')
+
       try {
-        const query = orderFilter ? `?filter=${orderFilter}` : '';
-        const statusQuery = statusFilter !== 'all' ? `&status=${statusFilter.toLowerCase()}` : '';
-        const response = await fetch(`/api/orders${query}${statusQuery}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const query =
+          orderFilter
+            ? `?filter=${orderFilter}`
+            : ''
+
+        const statusQuery =
+          statusFilter !== 'all'
+            ? `${query ? '&' : '?'}status=${statusFilter.toLowerCase()}`
+            : ''
+
+        const response =
+          await fetch(
+            `/api/orders${query}${statusQuery}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          )
 
         if (!response.ok) {
-          throw new Error('Unable to load orders');
+          throw new Error(
+            'Unable to load orders'
+          )
         }
 
-        const data = await response.json();
+        const data =
+          await response.json()
+
         setOrders(
-          (data.orders ?? []).map((order: any) => ({
+          (
+            data.orders ?? []
+          ).map((order: any) => ({
             ...order,
-            status: normalizeStatus(order.status),
+
+            status:
+              normalizeStatus(
+                order.status
+              ),
           }))
-        );
+        )
       } catch (err) {
-        console.error(err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch orders');
+        console.error(err)
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to fetch orders'
+        )
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
     }
 
-    loadOrders();
-  }, [user, orderFilter, statusFilter]);
+    loadOrders()
+  }, [
+    user,
+    orderFilter,
+    statusFilter,
+  ])
 
-  const filteredOrders = orders.filter((order) =>
-    `${order.product_name} ${order.game_name}`.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredOrders =
+    orders.filter((order) =>
+      `${order.product_name} ${order.game_name}`
+        .toLowerCase()
+        .includes(
+          searchQuery.toLowerCase()
+        )
+    )
 
-  const progressWidth = (status: string) => {
+  const progressWidth = (
+    status: string
+  ) => {
     switch (status) {
       case ORDER_STATUS.COMPLETED:
-        return '100%';
+        return '100%'
+
       case ORDER_STATUS.IN_PROGRESS:
       case ORDER_STATUS.DELIVERED:
-        return '60%';
+        return '60%'
+
       case ORDER_STATUS.PENDING:
-        return '20%';
+        return '20%'
+
       default:
-        return '0%';
+        return '0%'
     }
-  };
+  }
 
   return (
     <div className="flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
-      <div className="mb-6 sm:mb-8">
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">{t('myOrders')}</h1>
-            <p className="mt-2 text-sm text-slate-600 sm:text-base">{t('trackManageOrders')}</p>
-          </div>
-          <Link href="/dashboard/post-task">
-            <Button className="w-full gap-2 sm:w-auto">
-              <Plus size={18} />
-              {t('postNewTask')}
-            </Button>
-          </Link>
+      {/* ====================================== */}
+      {/* HEADER */}
+      {/* ====================================== */}
+
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">
+            Orders
+          </h1>
+
+          <p className="mt-2 text-slate-600">
+            Track and manage
+            your orders
+          </p>
         </div>
 
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
-            <Input
-              placeholder={t('searchOrders')}
-              className="pl-10"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+        {/* ====================================== */}
+        {/* CUSTOMER ACTIONS */}
+        {/* ====================================== */}
+
+        {user?.role ===
+          'customer' && (
+          <div className="flex gap-3">
+            <Link href="/dashboard/marketplace">
+              <Button className="gap-2">
+                <ShoppingBag size={18} />
+
+                Browse Shop
+              </Button>
+            </Link>
+
+            <Link href="/dashboard/topup">
+              <Button
+                variant="outline"
+                className="gap-2"
+              >
+                <Wallet size={18} />
+
+                Top Up Points
+              </Button>
+            </Link>
           </div>
-          <Button variant="outline" className="w-full gap-2 sm:w-auto">
-            <Filter size={18} />
-            {t('filter')}
-          </Button>
-        </div>
+        )}
+
+        {/* ====================================== */}
+        {/* SELLER ACTIONS */}
+        {/* ====================================== */}
+
+        {user?.role ===
+          'seller' && (
+          <div className="flex gap-3">
+            <Link href="/dashboard/orders/available">
+              <Button className="gap-2">
+                <Package size={18} />
+
+                Available Orders
+              </Button>
+            </Link>
+
+            <Link href="/dashboard/withdraw">
+              <Button
+                variant="outline"
+                className="gap-2"
+              >
+                <Wallet size={18} />
+
+                Withdraw
+              </Button>
+            </Link>
+          </div>
+        )}
+
+        {/* ====================================== */}
+        {/* ADMIN ACTIONS */}
+        {/* ====================================== */}
+
+        {user?.role ===
+          'admin' && (
+          <div className="flex flex-wrap gap-3">
+            <Link href="/dashboard/admin/users">
+              <Button className="gap-2">
+                <Users size={18} />
+
+                User Management
+              </Button>
+            </Link>
+
+            <Link href="/dashboard/admin/orders">
+              <Button
+                variant="outline"
+                className="gap-2"
+              >
+                <ClipboardList size={18} />
+
+                Order Management
+              </Button>
+            </Link>
+
+            <Link href="/dashboard/admin/withdrawals">
+              <Button
+                variant="outline"
+                className="gap-2"
+              >
+                <Wallet size={18} />
+
+                Withdraw Requests
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
+
+      {/* ====================================== */}
+      {/* SEARCH */}
+      {/* ====================================== */}
+
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+
+          <Input
+            placeholder="Search orders..."
+            className="pl-10"
+            value={searchQuery}
+            onChange={(e) =>
+              setSearchQuery(
+                e.target.value
+              )
+            }
+          />
+        </div>
+
+        <Button
+          variant="outline"
+          className="gap-2"
+        >
+          <Filter size={18} />
+
+          Filter
+        </Button>
+      </div>
+
+      {/* ====================================== */}
+      {/* FILTERS */}
+      {/* ====================================== */}
 
       <div className="mb-6 overflow-x-auto border-b border-slate-200">
         <div className="flex min-w-max gap-2">
-        {[
-          { key: 'all', label: t('all') },
-          { key: 'pending', label: t('pending') },
-          { key: 'in_progress', label: t('inProgress') },
-          { key: 'completed', label: t('completed') },
-        ].map((status) => (
-          <button
-            key={status.key}
-            className={`px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-blue-600 hover:text-blue-600 transition-colors ${
-              statusFilter === status.key ? 'border-blue-600 text-blue-600' : ''
-            }`}
-            onClick={() => setStatusFilter(status.key)}
-          >
-            {status.label}
-          </button>
-        ))}
+          {[
+            {
+              key: 'all',
+              label: 'All',
+            },
+
+            {
+              key: 'pending',
+              label: 'Pending',
+            },
+
+            {
+              key: 'in_progress',
+              label: 'In Progress',
+            },
+
+            {
+              key: 'completed',
+              label: 'Completed',
+            },
+          ].map((status) => (
+            <button
+              key={status.key}
+              className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                statusFilter ===
+                status.key
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent hover:border-blue-600 hover:text-blue-600'
+              }`}
+              onClick={() =>
+                setStatusFilter(
+                  status.key
+                )
+              }
+            >
+              {status.label}
+            </button>
+          ))}
         </div>
       </div>
+
+      {/* ====================================== */}
+      {/* ERROR */}
+      {/* ====================================== */}
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -174,86 +426,160 @@ export default function OrdersPage() {
         </div>
       )}
 
+      {/* ====================================== */}
+      {/* ORDERS */}
+      {/* ====================================== */}
+
       <div className="space-y-4">
         {loading ? (
           <div className="space-y-4">
-            {[1, 2, 3].map((index) => (
-              <Card key={index}>
-                <CardContent className="space-y-4 p-6">
-                  <Skeleton className="h-4 w-1/2" />
-                  <Skeleton className="h-5 w-full" />
-                  <Skeleton className="h-4 w-2/3" />
+            {[1, 2, 3].map(
+              (index) => (
+                <Card key={index}>
+                  <CardContent className="space-y-4 p-6">
+                    <Skeleton className="h-4 w-1/2" />
+
+                    <Skeleton className="h-5 w-full" />
+
+                    <Skeleton className="h-4 w-2/3" />
+                  </CardContent>
+                </Card>
+              )
+            )}
+          </div>
+        ) : filteredOrders.length >
+          0 ? (
+          filteredOrders.map(
+            (order) => (
+              <Card
+                key={order.id}
+                className="transition-shadow hover:shadow-md"
+              >
+                <CardContent className="p-4 sm:p-6">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+                    {/* PRODUCT */}
+
+                    <div className="md:col-span-4">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {
+                          order.game_name
+                        }
+                      </p>
+
+                      <Link
+                        href={`/dashboard/orders/${order.id}`}
+                      >
+                        <h3 className="font-semibold text-slate-900 hover:text-blue-600">
+                          {
+                            order.product_name
+                          }
+                        </h3>
+                      </Link>
+
+                      <p className="mt-1 text-sm text-slate-600">
+                        {order.assigned_seller_id
+                          ? 'Seller assigned'
+                          : 'Waiting for seller'}
+                      </p>
+                    </div>
+
+                    {/* PRICE */}
+
+                    <div className="md:col-span-2">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Price
+                      </p>
+
+                      <p className="text-lg font-bold text-slate-900">
+                        {
+                          order.points_amount
+                        }{' '}
+                        pts
+                      </p>
+                    </div>
+
+                    {/* PROGRESS */}
+
+                    <div className="md:col-span-2">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Progress
+                      </p>
+
+                      <div className="h-2 w-full rounded-full bg-slate-200">
+                        <div
+                          className="h-2 rounded-full bg-blue-600 transition-all"
+                          style={{
+                            width:
+                              progressWidth(
+                                order.status
+                              ),
+                          }}
+                        />
+                      </div>
+
+                      <p className="mt-1 text-xs text-slate-600">
+                        {getStatusLabel(
+                          order.status
+                        )}
+                      </p>
+                    </div>
+
+                    {/* STATUS */}
+
+                    <div className="md:col-span-2">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Status
+                      </p>
+
+                      <span
+                        className={`inline-block rounded border px-2 py-1 text-xs font-medium ${getStatusColor(order.status)}`}
+                      >
+                        {getStatusLabel(
+                          order.status
+                        )}
+                      </span>
+                    </div>
+
+                    {/* ACTION */}
+
+                    <div className="flex items-center md:col-span-2">
+                      <Link
+                        href={`/dashboard/orders/${order.id}`}
+                        className="w-full"
+                      >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                        >
+                          View
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
-            ))}
-          </div>
-        ) : filteredOrders.length > 0 ? (
-          filteredOrders.map((order) => (
-            <Card key={order.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-4 sm:p-6">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                  <div className="md:col-span-4">
-                    <p className="text-xs uppercase text-slate-500 font-semibold tracking-wide mb-1">
-                      {order.game_name}
-                    </p>
-                    <Link href={`/dashboard/orders/${order.id}`}>
-                      <h3 className="font-semibold text-slate-900 hover:text-blue-600 transition-colors">
-                        {order.product_name}
-                      </h3>
-                    </Link>
-                    <p className="text-sm text-slate-600 mt-1">
-                      {order.assigned_seller_id ? t('sellerAssigned') : t('waitingForSeller')}
-                    </p>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <p className="text-xs uppercase text-slate-500 font-semibold tracking-wide mb-1">
-                      {t('price')}
-                    </p>
-                    <p className="text-lg font-bold text-slate-900">{order.points_price} pts</p>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <p className="text-xs uppercase text-slate-500 font-semibold tracking-wide mb-2">
-                      {t('progress')}
-                    </p>
-                    <div className="w-full bg-slate-200 rounded-full h-2">
-                      <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: progressWidth(order.status) }} />
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1">{getStatusLabel(order.status)}</p>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <p className="text-xs uppercase text-slate-500 font-semibold tracking-wide mb-1">
-                      {t('status')}
-                    </p>
-                    <span className={`inline-block px-2 py-1 rounded text-xs font-medium border ${getStatusColor(order.status)}`}>
-                      {getStatusLabel(order.status)}
-                    </span>
-                  </div>
-
-                  <div className="md:col-span-2 flex gap-2">
-                    <Link href={`/dashboard/orders/${order.id}`}>
-                      <Button variant="outline" size="sm" className="w-full sm:w-auto">
-                        {t('view')}
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))
+            )
+          )
         ) : (
           <Card>
             <CardContent className="p-12 text-center">
-              <p className="text-slate-600 mb-4">{t('noOrdersFound')}</p>
-              <Link href="/dashboard/post-task">
-                <Button className="w-full sm:w-auto">{t('postFirstTask')}</Button>
-              </Link>
+              <p className="mb-4 text-slate-600">
+                No orders found
+              </p>
+
+              {user?.role ===
+                'customer' && (
+                <Link href="/dashboard/marketplace">
+                  <Button>
+                    Browse Shop
+                  </Button>
+                </Link>
+              )}
             </CardContent>
           </Card>
         )}
       </div>
     </div>
-  );
+  )
 }
