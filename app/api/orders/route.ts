@@ -20,6 +20,107 @@ function getAuth(request: NextRequest) {
   return verifyToken(authHeader.substring(7))
 }
 
+export async function GET(request: NextRequest) {
+  try {
+    const auth = getAuth(request)
+
+    if (!auth) {
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+        },
+        { status: 401 }
+      )
+    }
+
+    const { searchParams } = new URL(request.url)
+    const filter = searchParams.get('filter')
+
+    let query = db
+      .from('orders')
+      .select(`
+        id,
+        customer_id,
+        assigned_seller_id,
+        product_id,
+        game_account_id,
+        points_amount,
+        seller_earnings,
+        status,
+        product_name,
+        game_name,
+        created_at,
+        products (
+          name,
+          points_price
+        ),
+        users!orders_customer_id_fkey (
+          username
+        ),
+        game_accounts (
+          game_id,
+          games (
+            name
+          )
+        )
+      `)
+      .order('created_at', { ascending: false })
+
+    if (filter === 'my-orders') {
+      // Customer's orders
+      query = query.eq('customer_id', auth.id)
+    } else if (filter === 'my-tasks') {
+      // Seller's assigned orders
+      query = query.eq('assigned_seller_id', auth.id)
+    } else if (auth.role === 'admin') {
+      // Admin can see all orders
+    } else {
+      return NextResponse.json(
+        {
+          error: 'Invalid filter',
+        },
+        { status: 400 }
+      )
+    }
+
+    const { data: orders, error } = await query
+
+    if (error) {
+      console.error('Orders query error:', error)
+      return NextResponse.json(
+        {
+          error: 'Unable to load orders',
+        },
+        { status: 500 }
+      )
+    }
+
+    // Transform the data to match expected format
+    const transformedOrders = (orders ?? []).map((order: any) => ({
+      id: order.id,
+      product_name: order.product_name || order.products?.name,
+      game_name: order.game_name || order.game_accounts?.games?.name,
+      status: order.status,
+      points_price: order.points_amount || order.products?.points_price || 0,
+      seller_earnings: order.seller_earnings,
+      created_at: order.created_at,
+    }))
+
+    return NextResponse.json({
+      success: true,
+      orders: transformedOrders,
+    })
+  } catch (error) {
+    console.error('Get orders error:', error)
+    return NextResponse.json(
+      {
+        error: 'Internal server error',
+      },
+      { status: 500 }
+    )
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const auth = getAuth(request)
