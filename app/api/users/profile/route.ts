@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
+
 import {
   supabaseServer as supabase,
   supabaseAdmin,
 } from '@/lib/db'
 
-import { verifyToken } from '@/lib/auth'
+import {
+  verifyToken,
+  resolveUserId,
+} from '@/lib/auth'
+
+function isUUID(
+  value: string
+) {
+  return /^[0-9a-fA-F-]{36}$/.test(
+    value
+  )
+}
 
 export async function GET(
   request: NextRequest
@@ -28,7 +40,7 @@ export async function GET(
       return NextResponse.json(
         {
           error:
-            'Missing authorization token',
+            'Unauthorized',
         },
         { status: 401 }
       )
@@ -44,9 +56,34 @@ export async function GET(
       return NextResponse.json(
         {
           error:
-            'Invalid or expired token',
+            'Unauthorized',
         },
         { status: 401 }
+      )
+    }
+
+    const db =
+      supabaseAdmin ??
+      supabase
+
+    const resolvedUserId =
+      await resolveUserId(
+        auth,
+        db
+      )
+
+    if (
+      !resolvedUserId ||
+      !isUUID(
+        resolvedUserId
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid user id',
+        },
+        { status: 400 }
       )
     }
 
@@ -56,82 +93,31 @@ export async function GET(
 
     const {
       data: user,
-      error,
-    } = await supabase
+      error: userError,
+    } = await db
       .from('users')
-      .select('*')
-      .eq('id', auth.id)
+      .select(`
+        id,
+        username,
+        email,
+        role,
+        points,
+        balance,
+        status,
+        created_at
+      `)
+      .eq(
+        'id',
+        resolvedUserId
+      )
       .single()
 
-    let resolvedUser = user
-
-    // =====================================================
-    // FALLBACK EMAIL LOOKUP
-    // =====================================================
-
     if (
-      (error || !user) &&
-      auth.email
+      userError ||
+      !user
     ) {
-      const {
-        data: byEmail,
-      } = await supabase
-        .from('users')
-        .select('*')
-        .eq(
-          'email',
-          auth.email
-        )
-        .maybeSingle()
-
-      resolvedUser =
-        byEmail ?? null
-
-      if (
-        !resolvedUser &&
-        supabaseAdmin
-      ) {
-        try {
-          const {
-            data:
-              authUserLookup,
-          } =
-            await supabaseAdmin.auth.admin.getUserByEmail(
-              auth.email
-            )
-
-          if (
-            authUserLookup
-              ?.user?.id &&
-            authUserLookup.user
-              .id !== auth.id
-          ) {
-            const {
-              data: byAuthUid,
-            } = await supabase
-              .from('users')
-              .select('*')
-              .eq(
-                'id',
-                authUserLookup
-                  .user.id
-              )
-              .maybeSingle()
-
-            resolvedUser =
-              byAuthUid ??
-              null
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    if (!resolvedUser) {
       console.error(
-        'Profile query error:',
-        error
+        userError
       )
 
       return NextResponse.json(
@@ -143,227 +129,97 @@ export async function GET(
       )
     }
 
-    // =====================================================
-    // DEFAULTS
-    // =====================================================
-
-    let status =
-      resolvedUser.status ??
-      'pending'
-
-    let rejection_reason:
-      | string
-      | null = null
-
-    let business_description:
-      | string
-      | null = null
-
-    let business_name:
-      | string
-      | null = null
-
-    let assigned_categories:
-      string[] = []
-
-    let assigned_category_ids:
-      string[] = []
-
-    let assigned_games:
-      string[] = []
-
-    let average_rating = 0
-
-    let total_reviews = 0
-
-    let fee_percentage = 10
+    let sellerData: any =
+      null
 
     // =====================================================
-    // SELLER DATA
+    // SELLER INFO
     // =====================================================
 
     if (
-      resolvedUser.role ===
+      user.role ===
       'seller'
     ) {
       const {
-        data: seller,
-        error:
-          sellerError,
-      } = await supabase
-        .from('sellers')
+        data: assignments,
+      } = await db
+        .from(
+          'seller_categories'
+        )
         .select(`
-          id,
-          business_name,
-          business_description,
-          rejection_reason,
-          average_rating,
-          total_reviews,
-          fee_percentage
+          category_id,
+          categories (
+            id,
+            name,
+            game_id,
+            games (
+              id,
+              name
+            )
+          )
         `)
         .eq(
-          'user_id',
-          resolvedUser.id
+          'seller_id',
+          resolvedUserId
         )
-        .single()
 
-      if (
-        !sellerError &&
-        seller
-      ) {
-        rejection_reason =
-          seller.rejection_reason ??
-          null
+      const assigned_categories =
+        (
+          assignments ??
+          []
+        ).map(
+          (
+            item: any
+          ) =>
+            item.categories
+              ?.name
+        )
 
-        business_name =
-          seller.business_name ??
-          null
+      const assigned_category_ids =
+        (
+          assignments ??
+          []
+        ).map(
+          (
+            item: any
+          ) =>
+            item.category_id
+        )
 
-        business_description =
-          seller.business_description ??
-          null
-
-        average_rating =
-          Number(
-            seller.average_rating ??
-              0
-          )
-
-        total_reviews =
-          Number(
-            seller.total_reviews ??
-              0
-          )
-
-        fee_percentage =
-          Number(
-            seller.fee_percentage ??
-              10
-          )
-
-        // =====================================================
-        // CATEGORY ASSIGNMENTS
-        // =====================================================
-
-        const {
-          data:
-            sellerCategories,
-          error:
-            sellerCategoriesError,
-        } = await supabase
-          .from(
-            'seller_categories'
-          )
-          .select(`
-            category_id
-          `)
-          .eq(
-            'seller_id',
-            resolvedUser.id
-          )
-
-        if (
-          !sellerCategoriesError
-        ) {
-          const categoryIds =
+      const assigned_games =
+        Array.from(
+          new Set(
             (
-              sellerCategories ??
+              assignments ??
               []
             ).map(
               (
                 item: any
               ) =>
-                item.category_id
+                item
+                  .categories
+                  ?.games
+                  ?.name
             )
+          )
+        ).filter(Boolean)
 
-          assigned_category_ids =
-            categoryIds
+      sellerData = {
+        business_name:
+          user.username,
 
-          if (
-            categoryIds.length >
-            0
-          ) {
-            const {
-              data:
-                categoriesData,
-              error:
-                categoriesError,
-            } = await supabase
-              .from(
-                'categories'
-              )
-              .select(`
-                id,
-                name,
-                game_id
-              `)
-              .in(
-                'id',
-                categoryIds
-              )
+        business_description:
+          null,
 
-            if (
-              !categoriesError &&
-              categoriesData
-            ) {
-              assigned_categories =
-                (
-                  categoriesData as any[]
-                ).map(
-                  (
-                    category
-                  ) =>
-                    category.name
-                )
+        assigned_categories,
 
-              const gameIds =
-                Array.from(
-                  new Set(
-                    (
-                      categoriesData as any[]
-                    ).map(
-                      (
-                        category
-                      ) =>
-                        category.game_id
-                    )
-                  )
-                )
+        assigned_category_ids,
 
-              if (
-                gameIds.length >
-                0
-              ) {
-                const {
-                  data:
-                    gamesData,
-                } = await supabase
-                  .from(
-                    'games'
-                  )
-                  .select(`
-                    id,
-                    name
-                  `)
-                  .in(
-                    'id',
-                    gameIds
-                  )
+        assigned_games,
 
-                assigned_games =
-                  (
-                    gamesData ??
-                    []
-                  ).map(
-                    (
-                      game: any
-                    ) =>
-                      game.name
-                  )
-              }
-            }
-          }
-        }
+        average_rating: 0,
+
+        total_reviews: 0,
       }
     }
 
@@ -371,55 +227,34 @@ export async function GET(
     // RESPONSE
     // =====================================================
 
-    const normalizedUser =
+    return NextResponse.json(
       {
-        ...resolvedUser,
+        success: true,
 
-        total_points:
-          Number(
-            resolvedUser.points ??
-              0
-          ),
+        user: {
+          ...user,
 
-        balance: Number(
-          resolvedUser.balance ??
-            resolvedUser.points ??
-            0
-        ),
+          total_points:
+            Number(
+              user.points ??
+                0
+            ),
 
-        is_verified:
-          resolvedUser.is_verified ??
-          false,
+          balance:
+            Number(
+              user.balance ??
+                user.points ??
+                0
+            ),
 
-        status,
-
-        rejection_reason,
-
-        business_name,
-
-        business_description,
-
-        average_rating,
-
-        total_reviews,
-
-        fee_percentage,
-
-        assigned_categories,
-
-        assigned_category_ids,
-
-        assigned_games,
-      }
-
-    return NextResponse.json({
-      success: true,
-
-      user: normalizedUser,
-    })
+          ...sellerData,
+        },
+      },
+      { status: 200 }
+    )
   } catch (error) {
     console.error(
-      'Profile error:',
+      'Profile API error:',
       error
     )
 
