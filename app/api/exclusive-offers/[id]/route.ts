@@ -25,7 +25,7 @@ export async function GET(
         points_price,
         created_at,
         seller_id,
-        game_id,
+        category:category_id(id, name, game:game_id(id, name)),
         status,
         approved_at,
         seller:seller_id(id, username, avatar_url)
@@ -48,18 +48,8 @@ export async function GET(
     }
 
     let game: any = null
-    if (offer.game_id) {
-      const { data: gameData, error: gameError } = await supabase
-        .from('games')
-        .select('id, name')
-        .eq('id', offer.game_id)
-        .single()
-
-      if (gameError) {
-        console.error('Exclusive offer game lookup error:', gameError)
-        return NextResponse.json({ error: 'Offer not found' }, { status: 404 })
-      }
-      game = gameData
+    if (offer.category?.game) {
+      game = offer.category.game
     }
 
     let sellerStats: any = null
@@ -198,7 +188,17 @@ export async function PATCH(
       }
       updates.points_price = body.price
     }
-    if ('game_id' in body) updates.game_id = body.game_id
+    if ('game_id' in body) {
+      const { data: category } = await supabase
+        .from('categories')
+        .select('id')
+        .eq('game_id', body.game_id)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      updates.category_id = category?.id ?? null
+    }
 
     if (Object.keys(updates).length > 0 && (offer.status === 'approved' || offer.status === 'rejected')) {
       updates.status = 'pending'
