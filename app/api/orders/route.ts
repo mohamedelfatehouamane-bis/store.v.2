@@ -6,7 +6,6 @@ import { z } from 'zod'
 const db: any = supabaseAdmin ?? supabase
 
 const createOrderSchema = z.object({
-  game_id: z.string().uuid(),
   product_id: z.string().uuid(),
   account_id: z.string().uuid(),
 })
@@ -46,7 +45,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
 
     const {
-      game_id,
       product_id,
       account_id,
     } = createOrderSchema.parse(body)
@@ -65,8 +63,8 @@ export async function POST(request: NextRequest) {
         name,
         points_price,
         category_id,
-        game_id,
-        is_active
+        is_active,
+        categories (game_id)
       `)
       .eq('id', product_id)
       .eq('is_active', true)
@@ -83,14 +81,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // =====================================================
-    // VALIDATE GAME
-    // =====================================================
-
-    if (String(product.game_id) !== String(game_id)) {
+    if (
+      !product.category_id ||
+      !product.categories ||
+      !product.categories.game_id
+    ) {
       return NextResponse.json(
         {
-          error: 'Selected product does not belong to this game',
+          error: 'Product category is invalid',
         },
         { status: 400 }
       )
@@ -207,10 +205,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (String(gameAccount.game_id) !== String(game_id)) {
+    if (
+      String(gameAccount.game_id) !==
+      String(product.categories.game_id)
+    ) {
       return NextResponse.json(
         {
-          error: 'Game account mismatch',
+          error: 'Game account does not match product category game',
         },
         { status: 400 }
       )
