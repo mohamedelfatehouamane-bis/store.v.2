@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     const { data: products, error } = await supabase
       .from('products')
-      .select('id, name, description, points_price, created_at, status, seller_id, game_id')
+      .select('id, name, description, points_price, created_at, status, seller_id, category:category_id(id, name, game:game_id(id, name))')
       .eq('is_active', true)
       .eq('type', 'exclusive')
       .eq('status', 'pending')
@@ -36,35 +36,17 @@ export async function GET(request: NextRequest) {
           .filter((id: string | null | undefined) => Boolean(id))
       )
     )
-    const gameIds = Array.from(
-      new Set(
-        (products ?? [])
-          .map((product: any) => product.game_id)
-          .filter((id: string | null | undefined) => Boolean(id))
-      )
-    )
-
-    const [sellerResult, gameResult] = await Promise.all([
+    const [sellerResult] = await Promise.all([
       sellerIds.length > 0
         ? supabase.from('users').select('id, username').in('id', sellerIds)
-        : Promise.resolve({ data: [], error: null }),
-      gameIds.length > 0
-        ? supabase.from('games').select('id, name').in('id', gameIds)
         : Promise.resolve({ data: [], error: null }),
     ])
 
     const sellersById: Record<string, { id: string; username: string }> = {}
-    const gamesById: Record<string, { id: string; name: string }> = {}
 
     if (!sellerResult.error) {
       (sellerResult.data ?? []).forEach((user: any) => {
         sellersById[user.id] = { id: user.id, username: user.username }
-      })
-    }
-
-    if (!gameResult.error) {
-      (gameResult.data ?? []).forEach((game: any) => {
-        gamesById[game.id] = { id: game.id, name: game.name }
       })
     }
 
@@ -76,7 +58,12 @@ export async function GET(request: NextRequest) {
       created_at: product.created_at,
       status: product.status ?? 'pending',
       seller: sellersById[product.seller_id] ?? { id: product.seller_id, username: 'Unknown' },
-      game: gamesById[product.game_id] ?? null,
+      game: product.category?.game
+        ? {
+            id: product.category.game.id,
+            name: product.category.game.name,
+          }
+        : null,
     }))
 
     return NextResponse.json({
