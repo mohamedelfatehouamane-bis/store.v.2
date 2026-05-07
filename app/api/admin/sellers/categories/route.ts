@@ -52,22 +52,28 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: allCategoriesError.message }, { status: 500 });
     }
 
-    let assignedQuery = supabaseAdmin
+    const { data: assignedRows, error: assignedError } = await supabaseAdmin
       .from('seller_categories')
-      .select('category_id')
+      .select(`
+        seller_id,
+        category_id,
+        categories (
+          id,
+          name,
+          game_id,
+          games (
+            id,
+            name
+          )
+        )
+      `)
       .eq('seller_id', userId);
-
-    if (gameId) {
-      assignedQuery = assignedQuery.eq('game_id', gameId);
-    }
-
-    const { data: assignedRows, error: assignedError } = await assignedQuery;
 
     if (assignedError) {
       return NextResponse.json({ error: assignedError.message }, { status: 500 });
     }
 
-    const assignedIds = new Set((assignedRows ?? []).map((row: any) => String(row.category_id)));
+    const assignedCategoryIds = new Set((assignedRows ?? []).map((row: any) => String(row.category_id)));
 
     return NextResponse.json({
       success: true,
@@ -75,8 +81,12 @@ export async function GET(request: NextRequest) {
         id: category.id,
         name: category.name,
         game_id: category.game_id,
-        assigned: assignedIds.has(String(category.id)),
+        assigned: assignedCategoryIds.has(String(category.id)),
       })),
+      assigned_category_ids: Array.from(assignedCategoryIds),
+      assigned_categories: (assignedRows ?? [])
+        .map((row: any) => row.categories)
+        .filter(Boolean),
     });
   } catch (error) {
     console.error('Get seller categories error:', error);
@@ -162,7 +172,6 @@ export async function POST(request: NextRequest) {
 
     const rows = validCategories.map((category: any) => ({
       seller_id: user_id,
-      game_id: category.game_id,
       category_id: category.id,
     }));
 
