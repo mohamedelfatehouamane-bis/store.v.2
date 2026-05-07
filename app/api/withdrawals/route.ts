@@ -8,37 +8,83 @@ const MIN_WITHDRAWAL = 1000;
 
 const FEE_PERCENTAGE = 5;
 
-async function getSeller(request: NextRequest) {
-  const authHeader =
-    request.headers.get('authorization');
+async function getSeller(
+  request: NextRequest
+) {
+  try {
+    const authHeader =
+      request.headers.get(
+        'authorization'
+      );
 
-  if (
-    !authHeader ||
-    !authHeader.startsWith('Bearer ')
-  ) {
+    if (
+      !authHeader ||
+      !authHeader.startsWith(
+        'Bearer '
+      )
+    ) {
+      console.error(
+        'Missing auth header'
+      );
+
+      return null;
+    }
+
+    const token =
+      authHeader.substring(7);
+
+    let auth = null;
+
+    try {
+      auth =
+        verifyToken(token);
+    } catch (err) {
+      console.error(
+        'Token verification failed:',
+        err
+      );
+
+      return null;
+    }
+
+    if (!auth?.id) {
+      console.error(
+        'Invalid token payload'
+      );
+
+      return null;
+    }
+
+    const { data: user, error } =
+      await supabase
+        .from('users')
+        .select(`
+          id,
+          role,
+          points,
+          status
+        `)
+        .eq('id', auth.id)
+        .single();
+
+    if (error || !user) {
+      console.error(
+        'User fetch failed:',
+        error
+      );
+
+      return null;
+    }
+
+    return user;
+  } catch (err) {
+    console.error(
+      'getSeller error:',
+      err
+    );
+
     return null;
   }
-
-  const token =
-    authHeader.substring(7);
-
-  const auth = verifyToken(token);
-
-  if (!auth) return null;
-
-  const { data: user } =
-    await supabase
-      .from('users')
-      .select(`
-        id,
-        role,
-        total_points,
-        status
-      `)
-      .eq('id', auth.id)
-      .single();
-
-  return user;
 }
 
 // =======================================
