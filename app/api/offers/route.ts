@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     if (sellerId) {
       const { count: assignmentCount, error: assignmentError } = await supabase
         .from('seller_categories')
-        .select('*', { count: 'exact', head: true })
+        .select('seller_id', { count: 'exact', head: true })
         .eq('seller_id', sellerId)
         .eq('category_id', categoryId)
 
