@@ -8,6 +8,10 @@ const MIN_WITHDRAWAL = 1000;
 
 const FEE_PERCENTAGE = 5;
 
+// ======================================================
+// GET SELLER FROM TOKEN
+// ======================================================
+
 async function getSeller(
   request: NextRequest
 ) {
@@ -87,9 +91,9 @@ async function getSeller(
   }
 }
 
-// =======================================
+// ======================================================
 // GET WITHDRAWALS
-// =======================================
+// ======================================================
 
 export async function GET(
   request: NextRequest
@@ -140,9 +144,9 @@ export async function GET(
   }
 }
 
-// =======================================
+// ======================================================
 // CREATE WITHDRAWAL
-// =======================================
+// ======================================================
 
 export async function POST(
   request: NextRequest
@@ -192,6 +196,10 @@ export async function POST(
     const paymentDetails =
       body.payment_details;
 
+    // ============================
+    // VALIDATION
+    // ============================
+
     if (
       !amountRequested ||
       amountRequested <
@@ -206,7 +214,7 @@ export async function POST(
     }
 
     const balance = Number(
-      user.total_points ?? 0
+      user.points ?? 0
     );
 
     if (
@@ -221,7 +229,9 @@ export async function POST(
       );
     }
 
+    // ============================
     // BLOCK MULTIPLE PENDING
+    // ============================
 
     const {
       data: existingPending,
@@ -242,6 +252,10 @@ export async function POST(
       );
     }
 
+    // ============================
+    // CALCULATE FEES
+    // ============================
+
     const fee =
       Math.ceil(
         amountRequested *
@@ -251,7 +265,9 @@ export async function POST(
     const finalAmount =
       amountRequested - fee;
 
-    // DEDUCT BALANCE
+    // ============================
+    // DEDUCT USER BALANCE
+    // ============================
 
     const newBalance =
       balance -
@@ -262,8 +278,7 @@ export async function POST(
     } = await supabase
       .from('users')
       .update({
-        total_points:
-          newBalance,
+        points: newBalance,
       })
       .eq('id', user.id);
 
@@ -281,7 +296,9 @@ export async function POST(
       );
     }
 
+    // ============================
     // CREATE WITHDRAWAL
+    // ============================
 
     const {
       data: withdrawal,
@@ -311,18 +328,19 @@ export async function POST(
       .select()
       .single();
 
+    // ============================
+    // REFUND IF FAILED
+    // ============================
+
     if (insertError) {
       console.error(
         insertError
       );
 
-      // REFUND
-
       await supabase
         .from('users')
         .update({
-          total_points:
-            balance,
+          points: balance,
         })
         .eq('id', user.id);
 
