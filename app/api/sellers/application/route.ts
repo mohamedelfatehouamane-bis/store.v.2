@@ -11,9 +11,10 @@ const sellerApplicationSchema = z.object({
     .trim()
     .min(1),
 
-  // NEW LOGIC
   category_ids: z
-    .array(z.string().uuid())
+    .array(
+      z.string().trim().min(1)
+    )
     .min(1),
 })
 
@@ -37,10 +38,7 @@ export async function POST(
       )
     ) {
       return NextResponse.json(
-        {
-          error:
-            'Unauthorized',
-        },
+        { error: 'Unauthorized' },
         { status: 401 }
       )
     }
@@ -53,16 +51,13 @@ export async function POST(
 
     if (!auth) {
       return NextResponse.json(
-        {
-          error:
-            'Unauthorized',
-        },
+        { error: 'Unauthorized' },
         { status: 401 }
       )
     }
 
     // =====================================================
-    // BODY
+    // VALIDATE BODY
     // =====================================================
 
     const body =
@@ -90,20 +85,14 @@ export async function POST(
       .eq('id', auth.id)
       .single()
 
-    if (
-      userError ||
-      !user
-    ) {
+    if (userError || !user) {
       console.error(
         'Seller application user lookup error:',
         userError
       )
 
       return NextResponse.json(
-        {
-          error:
-            'User not found',
-        },
+        { error: 'User not found' },
         { status: 404 }
       )
     }
@@ -114,21 +103,21 @@ export async function POST(
 
     const {
       data: validCategories,
-      error:
-        categoriesError,
+      error: categoriesError,
     } = await supabase
       .from('categories')
-      .select('id')
+      .select(`
+        id,
+        game_id
+      `)
       .in(
         'id',
         payload.category_ids
       )
 
-    if (
-      categoriesError
-    ) {
+    if (categoriesError) {
       console.error(
-        'Category validation error:',
+        'Seller application category lookup error:',
         categoriesError
       )
 
@@ -143,11 +132,10 @@ export async function POST(
 
     const validCategoryIds =
       (
-        validCategories ??
-        []
+        validCategories ?? []
       ).map(
         (category: any) =>
-          category.id
+          String(category.id)
       )
 
     if (
@@ -164,26 +152,22 @@ export async function POST(
     }
 
     // =====================================================
-    // CHECK EXISTING SELLER
+    // FIND EXISTING SELLER
     // =====================================================
 
     const {
-      data:
-        existingSeller,
-      error:
-        sellerLookupError,
+      data: existingSeller,
+      error: sellerLookupError,
     } = await supabase
       .from('sellers')
-      .select('id')
-      .eq(
-        'user_id',
-        auth.id
-      )
+      .select(`
+        id,
+        user_id
+      `)
+      .eq('user_id', auth.id)
       .maybeSingle()
 
-    if (
-      sellerLookupError
-    ) {
+    if (sellerLookupError) {
       console.error(
         'Seller lookup error:',
         sellerLookupError
@@ -198,12 +182,12 @@ export async function POST(
       )
     }
 
-    // =====================================================
-    // CREATE / UPDATE SELLER PROFILE
-    // =====================================================
-
     let sellerId =
       existingSeller?.id
+
+    // =====================================================
+    // CREATE SELLER
+    // =====================================================
 
     if (!sellerId) {
       const {
@@ -212,8 +196,7 @@ export async function POST(
       } = await supabase
         .from('sellers')
         .insert({
-          user_id:
-            auth.id,
+          user_id: auth.id,
 
           business_name:
             payload.business_name ??
@@ -246,9 +229,12 @@ export async function POST(
       sellerId =
         insertResult.id
     } else {
+      // =====================================================
+      // UPDATE SELLER
+      // =====================================================
+
       const {
-        error:
-          updateError,
+        error: updateError,
       } = await supabase
         .from('sellers')
         .update({
@@ -259,14 +245,9 @@ export async function POST(
           business_description:
             payload.business_description,
         })
-        .eq(
-          'id',
-          sellerId
-        )
+        .eq('id', sellerId)
 
-      if (
-        updateError
-      ) {
+      if (updateError) {
         console.error(
           'Seller update error:',
           updateError
@@ -283,26 +264,23 @@ export async function POST(
     }
 
     // =====================================================
-    // UPDATE USER ROLE
+    // UPDATE USER ROLE + STATUS
     // =====================================================
 
     const {
-      error:
-        roleUpdateError,
+      error: roleUpdateError,
     } = await supabase
       .from('users')
       .update({
         role: 'seller',
 
-        // NEW SYSTEM
-        status:
-          'pending',
+        status: 'pending',
+
+        is_verified: false,
       })
       .eq('id', auth.id)
 
-    if (
-      roleUpdateError
-    ) {
+    if (roleUpdateError) {
       console.error(
         'Seller role update error:',
         roleUpdateError
@@ -311,32 +289,27 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'Unable to set seller role',
+            'Unable to update seller role',
         },
         { status: 500 }
       )
     }
 
     // =====================================================
-    // REMOVE OLD ASSIGNMENTS
+    // REMOVE OLD CATEGORY ASSIGNMENTS
     // =====================================================
 
     const {
-      error:
-        deleteError,
+      error: deleteError,
     } = await supabase
-      .from(
-        'seller_categories'
-      )
+      .from('seller_categories')
       .delete()
       .eq(
         'seller_id',
         auth.id
       )
 
-    if (
-      deleteError
-    ) {
+    if (deleteError) {
       console.error(
         'Seller category cleanup error:',
         deleteError
@@ -352,16 +325,13 @@ export async function POST(
     }
 
     // =====================================================
-    // INSERT NEW ASSIGNMENTS
+    // INSERT CATEGORY ASSIGNMENTS
     // =====================================================
 
     const assignments =
-      validCategoryIds.map(
-        (
-          categoryId
-        ) => ({
-          seller_id:
-            auth.id,
+      payload.category_ids.map(
+        (categoryId) => ({
+          seller_id: auth.id,
 
           category_id:
             categoryId,
@@ -369,19 +339,12 @@ export async function POST(
       )
 
     const {
-      error:
-        assignError,
+      error: assignError,
     } = await supabase
-      .from(
-        'seller_categories'
-      )
-      .insert(
-        assignments
-      )
+      .from('seller_categories')
+      .insert(assignments)
 
-    if (
-      assignError
-    ) {
+    if (assignError) {
       console.error(
         'Seller category assignment error:',
         assignError
@@ -413,8 +376,7 @@ export async function POST(
     )
 
     if (
-      error instanceof
-      z.ZodError
+      error instanceof z.ZodError
     ) {
       return NextResponse.json(
         {
