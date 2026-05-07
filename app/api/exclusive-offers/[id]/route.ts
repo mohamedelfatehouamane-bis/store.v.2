@@ -28,7 +28,6 @@ export async function GET(
         game_id,
         status,
         approved_at,
-        game:game_id(id, name),
         seller:seller_id(id, username, avatar_url)
         `
       )
@@ -46,6 +45,21 @@ export async function GET(
 
     if (error || !offer) {
       return NextResponse.json({ error: 'Offer not found' }, { status: 404 })
+    }
+
+    let game: any = null
+    if (offer.game_id) {
+      const { data: gameData, error: gameError } = await supabase
+        .from('games')
+        .select('id, name')
+        .eq('id', offer.game_id)
+        .single()
+
+      if (gameError) {
+        console.error('Exclusive offer game lookup error:', gameError)
+        return NextResponse.json({ error: 'Offer not found' }, { status: 404 })
+      }
+      game = gameData
     }
 
     let sellerStats: any = null
@@ -105,10 +119,12 @@ export async function GET(
         dispute_count: disputeCount,
         ...trust,
       },
-      game: offer.game ? {
-        id: offer.game.id,
-        name: offer.game.name,
-      } : null,
+      game: game
+        ? {
+            id: game.id,
+            name: game.name,
+          }
+        : null,
     })
   } catch (error) {
     console.error('Get exclusive offer error:', error)
