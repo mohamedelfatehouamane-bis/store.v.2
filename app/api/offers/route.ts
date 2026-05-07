@@ -4,27 +4,27 @@ import { supabaseServer as supabase } from '@/lib/db'
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const gameId = searchParams.get('gameId')
+    const categoryId =
+      searchParams.get('categoryId') ?? searchParams.get('gameId')
     const sellerId = searchParams.get('sellerId')
 
-    if (!gameId) {
+    if (!categoryId) {
       return NextResponse.json({ offers: [] })
     }
 
     if (sellerId) {
-      const { data: assignments, error: assignmentError } = await supabase
-        .from('seller_games')
-        .select('id')
+      const { count: assignmentCount, error: assignmentError } = await supabase
+        .from('seller_categories')
+        .select('seller_id', { count: 'exact', head: true })
         .eq('seller_id', sellerId)
-        .eq('game_id', gameId)
-        .limit(1)
+        .eq('category_id', categoryId)
 
       if (assignmentError) {
         console.error('Offers API seller assignment error:', assignmentError)
         return NextResponse.json({ offers: [] }, { status: 500 })
       }
 
-      if (!assignments || assignments.length === 0) {
+      if (!assignmentCount) {
         return NextResponse.json({ offers: [] })
       }
     }
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('id, name, points_price')
-      .eq('game_id', gameId)
+      .eq('category_id', categoryId)
       .eq('is_active', true)
 
     if (productsError) {
