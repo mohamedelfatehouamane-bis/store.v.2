@@ -4,19 +4,20 @@ import { supabaseServer as supabase } from '@/lib/db'
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const gameId = searchParams.get('gameId')
+    const categoryId =
+      searchParams.get('categoryId') ?? searchParams.get('gameId')
     const sellerId = searchParams.get('sellerId')
 
-    if (!gameId) {
+    if (!categoryId) {
       return NextResponse.json({ offers: [] })
     }
 
     if (sellerId) {
       const { data: assignments, error: assignmentError } = await supabase
-        .from('seller_games')
+        .from('seller_categories')
         .select('id')
         .eq('seller_id', sellerId)
-        .eq('game_id', gameId)
+        .eq('category_id', categoryId)
         .limit(1)
 
       if (assignmentError) {
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('id, name, points_price')
-      .eq('game_id', gameId)
+      .eq('category_id', categoryId)
       .eq('is_active', true)
 
     if (productsError) {
