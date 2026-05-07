@@ -81,7 +81,6 @@ export async function GET(
       .from('products')
       .select(`
         id,
-        game_id,
         category_id,
         name,
         description,
@@ -89,7 +88,15 @@ export async function GET(
         points_price,
         status,
         is_active,
-        created_at
+        created_at,
+        category:category_id(
+          id,
+          name,
+          game:game_id(
+            id,
+            name
+          )
+        )
       `)
       .eq('id', productId)
       .single()
@@ -113,50 +120,27 @@ export async function GET(
     // LOAD GAME
     // =====================================================
 
-    let game = null
-
-    if (product.game_id) {
-      const {
-        data: gameData,
-      } = await supabase
-        .from('games')
-        .select('id, name')
-        .eq(
-          'id',
-          product.game_id
-        )
-        .single()
-
-      game = gameData ?? null
-    }
+    const game = product.category?.game ?? null
 
     // =====================================================
     // LOAD CATEGORY
     // =====================================================
 
-    let category = null
-
-    if (product.category_id) {
-      const {
-        data: categoryData,
-      } = await supabase
-        .from('categories')
-        .select('id, name')
-        .eq(
-          'id',
-          product.category_id
-        )
-        .single()
-
-      category =
-        categoryData ?? null
-    }
+    const category = product.category
+      ? {
+          id: product.category.id,
+          name: product.category.name,
+        }
+      : null
 
     return NextResponse.json({
       success: true,
 
       product: {
         ...product,
+
+        game_id:
+          game?.id ?? null,
 
         game,
 
@@ -233,6 +217,19 @@ export async function PATCH(
     // =====================================================
 
     if (
+      payload.game_id &&
+      !payload.category_id
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Cannot update game without category_id',
+        },
+        { status: 400 }
+      )
+    }
+
+    if (
       payload.category_id &&
       payload.game_id
     ) {
@@ -262,16 +259,21 @@ export async function PATCH(
       }
     }
 
+    const updatePayload = {
+      ...payload,
+    }
+
+    delete updatePayload.game_id
+
     const {
       data: updatedProduct,
       error,
     } = await supabase
       .from('products')
-      .update(payload)
+      .update(updatePayload)
       .eq('id', productId)
       .select(`
         id,
-        game_id,
         category_id,
         name,
         description,
@@ -279,7 +281,15 @@ export async function PATCH(
         points_price,
         status,
         is_active,
-        created_at
+        created_at,
+        category:category_id(
+          id,
+          name,
+          game:game_id(
+            id,
+            name
+          )
+        )
       `)
       .single()
 
@@ -302,11 +312,30 @@ export async function PATCH(
       )
     }
 
+    const normalizedUpdatedProduct = {
+      ...updatedProduct,
+      game_id:
+        updatedProduct.category?.game?.id ??
+        null,
+      game:
+        updatedProduct.category?.game ??
+        null,
+      category:
+        updatedProduct.category
+          ? {
+              id:
+                updatedProduct.category.id,
+              name:
+                updatedProduct.category.name,
+            }
+          : null,
+    }
+
     return NextResponse.json({
       success: true,
 
       product:
-        updatedProduct,
+        normalizedUpdatedProduct,
     })
   } catch (error) {
     if (
