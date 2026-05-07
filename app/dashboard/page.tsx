@@ -250,6 +250,15 @@ export default function DashboardPage() {
     }
 
     loadDashboard()
+
+    // Auto-refresh profile every 15s to catch topup approvals and point updates
+    const refreshInterval =
+      setInterval(() => {
+        loadDashboard()
+      }, 15000)
+
+    return () =>
+      clearInterval(refreshInterval)
   }, [user])
 
   if (loading) {
