@@ -11,8 +11,6 @@ import {
   ORDER_STATUS,
 } from '@/lib/order-status'
 
-import { useLanguage } from '@/lib/language-context'
-
 import {
   Card,
   CardContent,
@@ -38,6 +36,7 @@ type OrderItem = {
   id: string
   product_name: string
   game_name: string
+  category_name?: string
   status: string
   points_amount: number
   assigned_seller_id?: string | null
@@ -60,9 +59,6 @@ function getStatusColor(
     case ORDER_STATUS.CANCELLED:
       return 'bg-red-50 text-red-700 border-red-200'
 
-    case ORDER_STATUS.DELIVERED:
-      return 'bg-slate-50 text-slate-700 border-slate-200'
-
     default:
       return 'bg-slate-50 text-slate-700 border-slate-200'
   }
@@ -83,9 +79,6 @@ function getStatusLabel(
 export default function OrdersPage() {
   const { user } =
     useAuth()
-
-  const { t } =
-    useLanguage()
 
   const [orders, setOrders] =
     useState<OrderItem[]>([])
@@ -131,24 +124,33 @@ export default function OrdersPage() {
     }
 
     async function loadOrders() {
-      setLoading(true)
-
-      setError('')
-
       try {
-        const query =
-          orderFilter
-            ? `?filter=${orderFilter}`
-            : ''
+        setLoading(true)
 
-        const statusQuery =
+        setError('')
+
+        const params =
+          new URLSearchParams()
+
+        if (orderFilter) {
+          params.append(
+            'filter',
+            orderFilter
+          )
+        }
+
+        if (
           statusFilter !== 'all'
-            ? `${query ? '&' : '?'}status=${statusFilter.toLowerCase()}`
-            : ''
+        ) {
+          params.append(
+            'status',
+            statusFilter
+          )
+        }
 
         const response =
           await fetch(
-            `/api/orders${query}${statusQuery}`,
+            `/api/orders?${params.toString()}`,
             {
               headers: {
                 Authorization: `Bearer ${token}`,
@@ -156,14 +158,15 @@ export default function OrdersPage() {
             }
           )
 
-        if (!response.ok) {
-          throw new Error(
-            'Unable to load orders'
-          )
-        }
-
         const data =
           await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              'Failed to load orders'
+          )
+        }
 
         setOrders(
           (
@@ -199,7 +202,7 @@ export default function OrdersPage() {
 
   const filteredOrders =
     orders.filter((order) =>
-      `${order.product_name} ${order.game_name}`
+      `${order.product_name} ${order.game_name} ${order.category_name ?? ''}`
         .toLowerCase()
         .includes(
           searchQuery.toLowerCase()
@@ -214,7 +217,6 @@ export default function OrdersPage() {
         return '100%'
 
       case ORDER_STATUS.IN_PROGRESS:
-      case ORDER_STATUS.DELIVERED:
         return '60%'
 
       case ORDER_STATUS.PENDING:
@@ -226,26 +228,21 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
-      {/* ====================================== */}
+    <div className="flex-1 px-4 py-6">
       {/* HEADER */}
-      {/* ====================================== */}
 
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">
+          <h1 className="text-3xl font-bold">
             Orders
           </h1>
 
-          <p className="mt-2 text-slate-600">
-            Track and manage
-            your orders
+          <p className="text-slate-500">
+            Manage your orders
           </p>
         </div>
 
-        {/* ====================================== */}
-        {/* CUSTOMER ACTIONS */}
-        {/* ====================================== */}
+        {/* CUSTOMER */}
 
         {user?.role ===
           'customer' && (
@@ -271,9 +268,7 @@ export default function OrdersPage() {
           </div>
         )}
 
-        {/* ====================================== */}
-        {/* SELLER ACTIONS */}
-        {/* ====================================== */}
+        {/* SELLER */}
 
         {user?.role ===
           'seller' && (
@@ -299,9 +294,7 @@ export default function OrdersPage() {
           </div>
         )}
 
-        {/* ====================================== */}
-        {/* ADMIN ACTIONS */}
-        {/* ====================================== */}
+        {/* ADMIN */}
 
         {user?.role ===
           'admin' && (
@@ -310,7 +303,7 @@ export default function OrdersPage() {
               <Button className="gap-2">
                 <Users size={18} />
 
-                User Management
+                Users
               </Button>
             </Link>
 
@@ -321,7 +314,7 @@ export default function OrdersPage() {
               >
                 <ClipboardList size={18} />
 
-                Order Management
+                Orders
               </Button>
             </Link>
 
@@ -332,20 +325,18 @@ export default function OrdersPage() {
               >
                 <Wallet size={18} />
 
-                Withdraw Requests
+                Withdrawals
               </Button>
             </Link>
           </div>
         )}
       </div>
 
-      {/* ====================================== */}
       {/* SEARCH */}
-      {/* ====================================== */}
 
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:gap-4">
+      <div className="mb-6 flex gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
           <Input
             placeholder="Search orders..."
@@ -369,128 +360,98 @@ export default function OrdersPage() {
         </Button>
       </div>
 
-      {/* ====================================== */}
       {/* FILTERS */}
-      {/* ====================================== */}
 
-      <div className="mb-6 overflow-x-auto border-b border-slate-200">
-        <div className="flex min-w-max gap-2">
-          {[
-            {
-              key: 'all',
-              label: 'All',
-            },
-
-            {
-              key: 'pending',
-              label: 'Pending',
-            },
-
-            {
-              key: 'in_progress',
-              label: 'In Progress',
-            },
-
-            {
-              key: 'completed',
-              label: 'Completed',
-            },
-          ].map((status) => (
-            <button
-              key={status.key}
-              className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-                statusFilter ===
-                status.key
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent hover:border-blue-600 hover:text-blue-600'
-              }`}
-              onClick={() =>
-                setStatusFilter(
-                  status.key
-                )
-              }
-            >
-              {status.label}
-            </button>
-          ))}
-        </div>
+      <div className="mb-6 flex gap-2 overflow-x-auto border-b pb-2">
+        {[
+          'all',
+          'pending',
+          'in_progress',
+          'completed',
+        ].map((status) => (
+          <button
+            key={status}
+            onClick={() =>
+              setStatusFilter(
+                status
+              )
+            }
+            className={`rounded px-4 py-2 text-sm ${
+              statusFilter ===
+              status
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100'
+            }`}
+          >
+            {getStatusLabel(
+              status
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* ====================================== */}
       {/* ERROR */}
-      {/* ====================================== */}
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
           {error}
         </div>
       )}
 
-      {/* ====================================== */}
-      {/* ORDERS */}
-      {/* ====================================== */}
+      {/* CONTENT */}
 
       <div className="space-y-4">
         {loading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map(
-              (index) => (
-                <Card key={index}>
-                  <CardContent className="space-y-4 p-6">
-                    <Skeleton className="h-4 w-1/2" />
+          [1, 2, 3].map(
+            (item) => (
+              <Card key={item}>
+                <CardContent className="space-y-4 p-6">
+                  <Skeleton className="h-4 w-1/2" />
 
-                    <Skeleton className="h-5 w-full" />
+                  <Skeleton className="h-4 w-full" />
 
-                    <Skeleton className="h-4 w-2/3" />
-                  </CardContent>
-                </Card>
-              )
-            )}
-          </div>
+                  <Skeleton className="h-4 w-2/3" />
+                </CardContent>
+              </Card>
+            )
+          )
         ) : filteredOrders.length >
           0 ? (
           filteredOrders.map(
             (order) => (
               <Card
                 key={order.id}
-                className="transition-shadow hover:shadow-md"
               >
-                <CardContent className="p-4 sm:p-6">
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-                    {/* PRODUCT */}
-
-                    <div className="md:col-span-4">
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <CardContent className="p-6">
+                  <div className="grid gap-4 md:grid-cols-5">
+                    <div>
+                      <p className="text-xs text-slate-500">
                         {
                           order.game_name
                         }
                       </p>
 
-                      <Link
-                        href={`/dashboard/orders/${order.id}`}
-                      >
-                        <h3 className="font-semibold text-slate-900 hover:text-blue-600">
-                          {
-                            order.product_name
-                          }
-                        </h3>
-                      </Link>
+                      <h3 className="font-semibold">
+                        {
+                          order.product_name
+                        }
+                      </h3>
 
-                      <p className="mt-1 text-sm text-slate-600">
-                        {order.assigned_seller_id
-                          ? 'Seller assigned'
-                          : 'Waiting for seller'}
-                      </p>
+                      {order.category_name && (
+                        <p className="text-sm text-slate-500">
+                          {
+                            order.category_name
+                          }
+                        </p>
+                      )}
                     </div>
 
-                    {/* PRICE */}
-
-                    <div className="md:col-span-2">
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <div>
+                      <p className="text-xs text-slate-500">
                         Price
                       </p>
 
-                      <p className="text-lg font-bold text-slate-900">
+                      <p className="font-bold">
                         {
                           order.points_amount
                         }{' '}
@@ -498,16 +459,10 @@ export default function OrdersPage() {
                       </p>
                     </div>
 
-                    {/* PROGRESS */}
-
-                    <div className="md:col-span-2">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Progress
-                      </p>
-
-                      <div className="h-2 w-full rounded-full bg-slate-200">
+                    <div>
+                      <div className="h-2 rounded-full bg-slate-200">
                         <div
-                          className="h-2 rounded-full bg-blue-600 transition-all"
+                          className="h-2 rounded-full bg-blue-600"
                           style={{
                             width:
                               progressWidth(
@@ -516,23 +471,11 @@ export default function OrdersPage() {
                           }}
                         />
                       </div>
-
-                      <p className="mt-1 text-xs text-slate-600">
-                        {getStatusLabel(
-                          order.status
-                        )}
-                      </p>
                     </div>
 
-                    {/* STATUS */}
-
-                    <div className="md:col-span-2">
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Status
-                      </p>
-
+                    <div>
                       <span
-                        className={`inline-block rounded border px-2 py-1 text-xs font-medium ${getStatusColor(order.status)}`}
+                        className={`rounded border px-2 py-1 text-xs ${getStatusColor(order.status)}`}
                       >
                         {getStatusLabel(
                           order.status
@@ -540,16 +483,12 @@ export default function OrdersPage() {
                       </span>
                     </div>
 
-                    {/* ACTION */}
-
-                    <div className="flex items-center md:col-span-2">
+                    <div>
                       <Link
                         href={`/dashboard/orders/${order.id}`}
-                        className="w-full"
                       >
                         <Button
                           variant="outline"
-                          size="sm"
                           className="w-full"
                         >
                           View
@@ -564,7 +503,7 @@ export default function OrdersPage() {
         ) : (
           <Card>
             <CardContent className="p-12 text-center">
-              <p className="mb-4 text-slate-600">
+              <p className="mb-4 text-slate-500">
                 No orders found
               </p>
 
