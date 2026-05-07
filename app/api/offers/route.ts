@@ -4,88 +4,138 @@ import { supabaseServer as supabase } from '@/lib/db'
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const categoryId =
-      searchParams.get('categoryId') ?? searchParams.get('gameId')
+
+    // categoryId is the NEW structure
+    const categoryId = searchParams.get('categoryId')
+
+    // optional seller filter
     const sellerId = searchParams.get('sellerId')
 
     if (!categoryId) {
-      return NextResponse.json({ offers: [] })
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'categoryId is required',
+          offers: [],
+        },
+        { status: 400 }
+      )
     }
 
+    // Validate seller assignment to category
     if (sellerId) {
-      const { count: assignmentCount, error: assignmentError } = await supabase
+      const {
+        data: sellerAssignment,
+        error: assignmentError,
+      } = await supabase
         .from('seller_categories')
-        .select('seller_id', { count: 'exact', head: true })
+        .select('seller_id')
         .eq('seller_id', sellerId)
         .eq('category_id', categoryId)
+        .single()
 
-      if (assignmentError) {
-        console.error('Offers API seller assignment error:', assignmentError)
-        return NextResponse.json({ offers: [] }, { status: 500 })
+      if (assignmentError && assignmentError.code !== 'PGRST116') {
+        console.error(
+          'Offers API seller assignment error:',
+          assignmentError
+        )
+
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Failed to validate seller assignment',
+            offers: [],
+          },
+          { status: 500 }
+        )
       }
 
-      if (!assignmentCount) {
-        return NextResponse.json({ offers: [] })
+      if (!sellerAssignment) {
+        return NextResponse.json({
+          success: true,
+          offers: [],
+        })
       }
     }
 
-    const { data: products, error: productsError } = await supabase
+    // Load products by category
+    const {
+      data: products,
+      error: productsError,
+    } = await supabase
       .from('products')
-      .select('id, name, points_price')
+      .select(`
+        id,
+        name,
+        points_price,
+        category_id,
+        is_active
+      `)
       .eq('category_id', categoryId)
       .eq('is_active', true)
 
     if (productsError) {
-      console.error('Offers API products error:', productsError)
-      return NextResponse.json({ offers: [] }, { status: 500 })
+      console.error(
+        'Offers API products error:',
+        productsError
+      )
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Failed to load products',
+          offers: [],
+        },
+        { status: 500 }
+      )
     }
 
-    const productIds = (products ?? []).map((product: any) => product.id)
-    if (productIds.length === 0) {
-      return NextResponse.json({ offers: [] })
+    // No products found
+    if (!products || products.length === 0) {
+      return NextResponse.json({
+        success: true,
+        offers: [],
+      })
     }
 
-    const { data: offers, error: offersError } = await supabase
-      .from('offers')
-      .select('id, quantity, unit, points_price, product_id')
-      .in('product_id', productIds)
-      .eq('is_active', true)
+    // Convert products to marketplace offers
+    const offers = products.map((product: any) => ({
+      id: product.id,
+      product_id: product.id,
 
-    if (offersError) {
-      if (offersError.code === 'PGRST205') {
-        const fallbackPayload = (products ?? []).map((product: any) => ({
-          offer_id: product.id,
-          name: product.name || 'Unnamed offer',
-          quantity: 1,
-          unit: 'item',
-          price: Number(product.points_price ?? 0),
-        }))
+      // compatibility with old frontend
+      offer_id: product.id,
 
-        return NextResponse.json({ offers: fallbackPayload })
-      }
+      name: product.name || 'Unnamed Product',
 
-      console.error('Offers API offers error:', offersError)
-      return NextResponse.json({ offers: [] }, { status: 500 })
-    }
+      quantity: 1,
 
-    const productMap = new Map<string, string>()
-    ;(products ?? []).forEach((product: any) => {
-      if (product.id) {
-        productMap.set(product.id, product.name || '')
-      }
-    })
+      unit: 'item',
 
-    const payload = (offers ?? []).map((offer: any) => ({
-      offer_id: offer.id,
-      name: productMap.get(offer.product_id) ?? 'Unnamed offer',
-      quantity: offer.quantity ?? 0,
-      unit: offer.unit ?? '',
-      price: offer.points_price ?? 0,
+      price: Number(product.points_price ?? 0),
+
+      points_price: Number(product.points_price ?? 0),
+
+      category_id: product.category_id,
     }))
 
-    return NextResponse.json({ offers: payload })
+    return NextResponse.json({
+      success: true,
+      offers,
+    })
   } catch (error) {
-    console.error('Offers API unexpected error:', error)
-    return NextResponse.json({ offers: [] }, { status: 500 })
+    console.error(
+      'Offers API unexpected error:',
+      error
+    )
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Internal server error',
+        offers: [],
+      },
+      { status: 500 }
+    )
   }
 }
