@@ -115,7 +115,7 @@ export async function GET(
     );
 
     const { data: productsData, error: productsError } = productIds.length
-      ? await supabase.from('products').select('id, game_id').in('id', productIds)
+      ? await supabase.from('products').select('id, category:category_id(id, game_id)').in('id', productIds)
       : { data: [], error: null };
 
     if (productsError) {
@@ -124,7 +124,7 @@ export async function GET(
     }
 
     const gameIds = Array.from(
-      new Set((productsData ?? []).map((product: any) => product.game_id).filter(Boolean))
+      new Set((productsData ?? []).map((product: any) => product.category?.game_id).filter(Boolean))
     );
 
     const { data: gamesData, error: gamesError } = gameIds.length
@@ -137,7 +137,7 @@ export async function GET(
     }
 
     const offerToProduct = new Map((offersData ?? []).map((offer: any) => [String(offer.id), String(offer.product_id)]));
-    const productToGame = new Map((productsData ?? []).map((product: any) => [String(product.id), String(product.game_id)]));
+    const productToGame = new Map((productsData ?? []).map((product: any) => [String(product.id), String(product.category?.game_id)]));
     const gameNameById = new Map((gamesData ?? []).map((game: any) => [String(game.id), String(game.name)]));
 
     const recentOrders = (ordersData ?? []).map((order: any) => {
