@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       .from('offers')
       .select(`
         id, name, quantity, unit, points_price, is_active, created_at, updated_at,
-        product:product_id(id, name, category:category_id(id, name), game:game_id(id, name))
+        product:product_id(id, name, category:category_id(id, name), game_id)
       `)
       .order('created_at', { ascending: false });
 
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
         .from('offers')
         .select(`
           id, quantity, unit, points_price, is_active, created_at, updated_at,
-          product:product_id(id, name, category:category_id(id, name), game:game_id(id, name))
+          product:product_id(id, name, category:category_id(id, name), game_id)
         `)
         .order('created_at', { ascending: false });
 
@@ -52,6 +52,23 @@ export async function GET(request: NextRequest) {
       data = withName.data ?? [];
     }
 
+    const gameIds = Array.from(
+      new Set((data ?? []).map((o: any) => String(o.product?.game_id ?? '')).filter(Boolean))
+    )
+    let gamesById = new Map<string, any>()
+    if (gameIds.length > 0) {
+      const { data: games, error: gamesError } = await supabase
+        .from('games')
+        .select('id, name')
+        .in('id', gameIds)
+
+      if (gamesError) {
+        console.error('Admin offers game lookup error:', gamesError)
+        return NextResponse.json({ error: 'Failed to fetch offers' }, { status: 500 });
+      }
+      gamesById = new Map((games ?? []).map((game: any) => [String(game.id), game]))
+    }
+
     const offers = (data ?? []).map((o: any) => ({
       id: o.id,
       name: o.name ?? o.product?.name ?? '',
@@ -59,8 +76,10 @@ export async function GET(request: NextRequest) {
       product_name: o.product?.name ?? '',
       category_id: o.product?.category?.id ?? null,
       category_name: o.product?.category?.name ?? '',
-      game_id: o.product?.game?.id ?? null,
-      game_name: o.product?.game?.name ?? '',
+      game_id: o.product?.game_id ?? null,
+      game_name: o.product?.game_id
+        ? gamesById.get(String(o.product?.game_id))?.name ?? ''
+        : '',
       quantity: o.quantity,
       unit: o.unit,
       points_price: o.points_price,
