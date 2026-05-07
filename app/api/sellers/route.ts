@@ -216,60 +216,13 @@ export async function GET(request: NextRequest) {
       )
 
     // =====================================================
-    // LOAD GAMES
-    // =====================================================
-
-    const gameIds =
-      Array.from(
-        new Set(
-          categories.map(
-            (category: any) =>
-              category.game_id
-          )
-        )
-      )
-
-    let games: any[] = []
-
-    if (gameIds.length > 0) {
-      const {
-        data: gamesData,
-      } = await supabase
-        .from('games')
-        .select(`
-          id,
-          name
-        `)
-        .in(
-          'id',
-          gameIds
-        )
-
-      games =
-        gamesData ?? []
-    }
-
-    const gameMap =
-      new Map(
-        games.map(
-          (game: any) => [
-            String(game.id),
-            game.name,
-          ]
-        )
-      )
-
-    // =====================================================
     // BUILD MAPS
     // =====================================================
 
-    const categoriesBySeller =
-      new Map<
-        string,
-        any[]
-      >()
+    const assignedGameIdsBySeller =
+      new Map<string, string[]>()
 
-    const gamesBySeller =
+    const categoriesBySeller =
       new Map<
         string,
         any[]
@@ -310,33 +263,28 @@ export async function GET(request: NextRequest) {
 
       // games
 
-      const gameName =
-        gameMap.get(
-          String(
-            category.game_id
-          )
+      const gameId =
+        String(
+          category.game_id
         )
 
-      if (gameName) {
-        const currentGames =
-          gamesBySeller.get(
+      if (gameId) {
+        const currentGameIds =
+          assignedGameIdsBySeller.get(
             sellerId
           ) ?? []
 
         if (
-          !currentGames.includes(
-            gameName
+          !currentGameIds.includes(
+            gameId
           )
         ) {
-          currentGames.push(
-            gameName
+          currentGameIds.push(gameId)
+          assignedGameIdsBySeller.set(
+            sellerId,
+            currentGameIds
           )
         }
-
-        gamesBySeller.set(
-          sellerId,
-          currentGames
-        )
       }
     }
 
@@ -506,11 +454,6 @@ export async function GET(request: NextRequest) {
                 String(user.id)
               ) ?? [],
 
-            assigned_games:
-              gamesBySeller.get(
-                String(user.id)
-              ) ?? [],
-
             trust_score:
               trust.trust_score,
 
@@ -528,11 +471,16 @@ export async function GET(request: NextRequest) {
     // =====================================================
 
     if (gameId) {
-      sellers = sellers.filter(
-        (seller) =>
-          seller.assigned_games
-            .length > 0
-      )
+      sellers = sellers.filter((seller) => {
+        const assignedGameIds =
+          assignedGameIdsBySeller.get(
+            seller.id
+          ) ?? []
+
+        return assignedGameIds.includes(
+          String(gameId)
+        )
+      })
     }
 
     // =====================================================
