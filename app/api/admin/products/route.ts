@@ -92,17 +92,13 @@ export async function GET(
           is_active,
           status,
           created_at,
-          game_id,
-          category_id,
-
-          games (
+          category:category_id(
             id,
-            name
-          ),
-
-          categories (
-            id,
-            name
+            name,
+            game:game_id(
+              id,
+              name
+            )
           )
         `)
         .order('created_at', {
@@ -150,17 +146,19 @@ export async function GET(
         product.created_at,
 
       game_id:
-        product.game_id,
+        product.category?.game?.id ??
+        null,
 
       game_name:
-        product.games?.name ??
+        product.category?.game?.name ??
         '',
 
       category_id:
-        product.category_id,
+        product.category?.id ??
+        null,
 
       category_name:
-        product.categories?.name ??
+        product.category?.name ??
         '',
     }))
 
@@ -438,7 +436,6 @@ export async function POST(
     } = await supabase
       .from('products')
       .insert({
-        game_id,
         category_id,
         name,
         points_price,
