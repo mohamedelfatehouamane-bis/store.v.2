@@ -1,292 +1,581 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer as supabase } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { buildTrustSummary } from '@/lib/trust-score';
+import { NextRequest, NextResponse } from 'next/server'
+import { supabaseServer as supabase } from '@/lib/db'
+import { verifyToken } from '@/lib/auth'
+import { buildTrustSummary } from '@/lib/trust-score'
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const sort = searchParams.get('sort') || 'rating';
-    const limit = Math.min(parseInt(searchParams.get('limit') || '20'), 100);
-    const gameId = searchParams.get('gameId');
+    const { searchParams } = new URL(request.url)
 
-    let users: any[] = [];
-    const usersSelectWithReputation =
-      'id, username, avatar_url, points, is_active, role, rating, total_reviews, completed_orders, dispute_count';
+    const sort =
+      searchParams.get('sort') || 'rating'
 
-    const { data: usersWithReputation, error: usersWithReputationError } = await supabase
+    const limit = Math.min(
+      parseInt(
+        searchParams.get('limit') || '20'
+      ),
+      100
+    )
+
+    const gameId =
+      searchParams.get('gameId')
+
+    // =====================================================
+    // LOAD SELLER USERS
+    // =====================================================
+
+    const {
+      data: users,
+      error: usersError,
+    } = await supabase
       .from('users')
-      .select(usersSelectWithReputation)
+      .select(`
+        id,
+        username,
+        avatar_url,
+        points,
+        is_active,
+        role,
+        status,
+        rating,
+        total_reviews,
+        completed_orders,
+        dispute_count
+      `)
       .eq('role', 'seller')
+      .eq('status', 'approved')
       .eq('is_active', true)
-      .limit(limit * 3);
+      .limit(limit * 3)
 
-    if (usersWithReputationError && usersWithReputationError.code === '42703') {
-      const { data: usersLegacy, error: usersLegacyError } = await supabase
-        .from('users')
-        .select('id, username, avatar_url, points, is_active, role')
-        .eq('role', 'seller')
-        .eq('is_active', true)
-        .limit(limit * 3);
+    if (usersError) {
+      console.error(
+        'Get sellers users error:',
+        usersError
+      )
 
-      if (usersLegacyError) {
-        console.error('Get sellers users fallback error:', usersLegacyError);
-        return NextResponse.json({ error: usersLegacyError.message }, { status: 500 });
-      }
-
-      users = usersLegacy ?? [];
-    } else if (usersWithReputationError) {
-      console.error('Get sellers users error:', usersWithReputationError);
-      return NextResponse.json({ error: usersWithReputationError.message }, { status: 500 });
-    } else {
-      users = usersWithReputation ?? [];
+      return NextResponse.json(
+        {
+          error:
+            usersError.message,
+        },
+        { status: 500 }
+      )
     }
 
-    const userIds = users.map((u: any) => String(u.id));
+    const userIds =
+      (users ?? []).map((u: any) =>
+        String(u.id)
+      )
+
     if (userIds.length === 0) {
-      return NextResponse.json({ success: true, sellers: [] });
+      return NextResponse.json({
+        success: true,
+        sellers: [],
+      })
     }
 
-    const { data: sellerProfiles, error: profilesError } = await supabase
+    // =====================================================
+    // LOAD SELLER PROFILES
+    // =====================================================
+
+    const {
+      data: sellerProfiles,
+      error: profilesError,
+    } = await supabase
       .from('sellers')
-      .select('id, user_id, business_name, business_description, total_tasks_completed, average_rating, fee_percentage, verification_status')
+      .select(`
+        id,
+        user_id,
+        business_name,
+        business_description,
+        total_tasks_completed,
+        average_rating,
+        fee_percentage
+      `)
       .in('user_id', userIds)
-      .eq('verification_status', 'verified');
 
     if (profilesError) {
-      console.error('Get sellers profiles error:', profilesError);
-      return NextResponse.json({ error: profilesError.message }, { status: 500 });
+      console.error(
+        'Get sellers profiles error:',
+        profilesError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            profilesError.message,
+        },
+        { status: 500 }
+      )
     }
 
-    const profiles = sellerProfiles ?? [];
-    const sellerIds = profiles.map((s: any) => String(s.id));
-    const profileByUserId = new Map(profiles.map((s: any) => [String(s.user_id), s]));
+    const profiles =
+      sellerProfiles ?? []
 
-    const { data: assignments, error: assignmentsError } = sellerIds.length
-      ? await supabase
-          .from('seller_games')
-          .select('seller_id, game_id')
-          .in('seller_id', sellerIds)
-      : { data: [], error: null };
+    const profileByUserId =
+      new Map(
+        profiles.map(
+          (profile: any) => [
+            String(profile.user_id),
+            profile,
+          ]
+        )
+      )
 
-    if (assignmentsError) {
-      console.error('Get sellers assignments error:', assignmentsError);
-      return NextResponse.json({ error: assignmentsError.message }, { status: 500 });
+    // =====================================================
+    // LOAD CATEGORY ASSIGNMENTS
+    // =====================================================
+
+    const {
+      data: categoryAssignments,
+      error: categoryAssignmentsError,
+    } = await supabase
+      .from('seller_categories')
+      .select(`
+        seller_id,
+        category_id
+      `)
+      .in(
+        'seller_id',
+        userIds
+      )
+
+    if (
+      categoryAssignmentsError
+    ) {
+      console.error(
+        'Get seller category assignments error:',
+        categoryAssignmentsError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            categoryAssignmentsError.message,
+        },
+        { status: 500 }
+      )
     }
 
-    const allGameIds = Array.from(
-      new Set((assignments ?? []).map((a: any) => a.game_id).filter(Boolean))
-    );
+    // =====================================================
+    // LOAD CATEGORIES
+    // =====================================================
 
-    const { data: gamesData, error: gamesError } = allGameIds.length
-      ? await supabase.from('games').select('id, name').in('id', allGameIds)
-      : { data: [], error: null };
+    const categoryIds =
+      Array.from(
+        new Set(
+          (
+            categoryAssignments ??
+            []
+          ).map(
+            (assignment: any) =>
+              assignment.category_id
+          )
+        )
+      )
 
-    if (gamesError) {
-      console.error('Get sellers games error:', gamesError);
-      return NextResponse.json({ error: gamesError.message }, { status: 500 });
+    let categories: any[] = []
+
+    if (categoryIds.length > 0) {
+      const {
+        data:
+          categoriesData,
+      } = await supabase
+        .from('categories')
+        .select(`
+          id,
+          name,
+          game_id
+        `)
+        .in(
+          'id',
+          categoryIds
+        )
+
+      categories =
+        categoriesData ?? []
     }
 
-    const gameNameById = new Map((gamesData ?? []).map((g: any) => [String(g.id), String(g.name)]));
-    const assignmentMap = new Map<string, string[]>();
+    const categoryMap =
+      new Map(
+        categories.map(
+          (category: any) => [
+            String(category.id),
+            category,
+          ]
+        )
+      )
 
-    (assignments ?? []).forEach((row: any) => {
-      const sellerId = String(row.seller_id);
-      const gameName = gameNameById.get(String(row.game_id));
-      if (!gameName) return;
-      const current = assignmentMap.get(sellerId) ?? [];
-      current.push(gameName);
-      assignmentMap.set(sellerId, current);
-    });
+    // =====================================================
+    // LOAD GAMES
+    // =====================================================
 
-    const { data: inProgressOrders, error: ordersError } = await supabase
+    const gameIds =
+      Array.from(
+        new Set(
+          categories.map(
+            (category: any) =>
+              category.game_id
+          )
+        )
+      )
+
+    let games: any[] = []
+
+    if (gameIds.length > 0) {
+      const {
+        data: gamesData,
+      } = await supabase
+        .from('games')
+        .select(`
+          id,
+          name
+        `)
+        .in(
+          'id',
+          gameIds
+        )
+
+      games =
+        gamesData ?? []
+    }
+
+    const gameMap =
+      new Map(
+        games.map(
+          (game: any) => [
+            String(game.id),
+            game.name,
+          ]
+        )
+      )
+
+    // =====================================================
+    // BUILD SELLER CATEGORY/GAME MAPS
+    // =====================================================
+
+    const categoriesBySeller =
+      new Map<
+        string,
+        any[]
+      >()
+
+    const gamesBySeller =
+      new Map<
+        string,
+        string[]
+      >()
+
+    for (const assignment of categoryAssignments ??
+      []) {
+      const sellerId = String(
+        assignment.seller_id
+      )
+
+      const category =
+        categoryMap.get(
+          String(
+            assignment.category_id
+          )
+        )
+
+      if (!category) continue
+
+      const currentCategories =
+        categoriesBySeller.get(
+          sellerId
+        ) ?? []
+
+      currentCategories.push({
+        id: category.id,
+        name: category.name,
+      })
+
+      categoriesBySeller.set(
+        sellerId,
+        currentCategories
+      )
+
+      const gameName =
+        gameMap.get(
+          String(
+            category.game_id
+          )
+        )
+
+      if (gameName) {
+        const currentGames =
+          gamesBySeller.get(
+            sellerId
+          ) ?? []
+
+        if (
+          !currentGames.includes(
+            gameName
+          )
+        ) {
+          currentGames.push(
+            gameName
+          )
+        }
+
+        gamesBySeller.set(
+          sellerId,
+          currentGames
+        )
+      }
+    }
+
+    // =====================================================
+    // LOAD ACTIVE ORDERS
+    // =====================================================
+
+    const {
+      data: activeOrders,
+      error: ordersError,
+    } = await supabase
       .from('orders')
-      .select('assigned_seller_id')
-      .eq('status', 'in_progress')
-      .in('assigned_seller_id', userIds);
+      .select(
+        'assigned_seller_id'
+      )
+      .eq(
+        'status',
+        'in_progress'
+      )
+      .in(
+        'assigned_seller_id',
+        userIds
+      )
 
     if (ordersError) {
-      console.error('Get sellers active orders error:', ordersError);
-      return NextResponse.json({ error: ordersError.message }, { status: 500 });
+      console.error(
+        'Get sellers active orders error:',
+        ordersError
+      )
+
+      return NextResponse.json(
+        {
+          error:
+            ordersError.message,
+        },
+        { status: 500 }
+      )
     }
 
-    const activeOrdersCountByUserId = new Map<string, number>();
-    (inProgressOrders ?? []).forEach((order: any) => {
-      const key = String(order.assigned_seller_id);
-      activeOrdersCountByUserId.set(key, (activeOrdersCountByUserId.get(key) ?? 0) + 1);
-    });
+    const activeOrdersMap =
+      new Map<
+        string,
+        number
+      >()
 
-    let sellers = users
-      .map((u: any) => {
-        const profile = profileByUserId.get(String(u.id));
-        if (!profile) return null;
-        const assignedGames = assignmentMap.get(String(profile.id)) ?? [];
+    ;(
+      activeOrders ?? []
+    ).forEach(
+      (order: any) => {
+        const sellerId =
+          String(
+            order.assigned_seller_id
+          )
 
-        const averageRating = Number(
-          u.rating ?? profile.average_rating ?? 0
-        );
-        const completedOrders = Number(
-          u.completed_orders ?? profile.total_tasks_completed ?? 0
-        );
-        const totalReviews = Number(u.total_reviews ?? 0);
-        const disputeCount = Number(u.dispute_count ?? 0);
-        const trust = buildTrustSummary({
-          rating: averageRating,
-          completed_orders: completedOrders,
-          dispute_count: disputeCount,
-        });
+        activeOrdersMap.set(
+          sellerId,
+          (
+            activeOrdersMap.get(
+              sellerId
+            ) ?? 0
+          ) + 1
+        )
+      }
+    )
 
-        return {
-          id: String(u.id),
-          username: u.username,
-          avatar_url: u.avatar_url,
-          total_points: Number(u.points ?? 0),
-          business_name: profile.business_name ?? null,
-          business_description: profile.business_description ?? null,
-          total_tasks_completed: completedOrders,
-          completed_orders: completedOrders,
-          average_rating: averageRating,
-          rating: averageRating,
-          total_reviews: totalReviews,
-          dispute_count: disputeCount,
-          fee_percentage: Number(profile.fee_percentage ?? 10),
-          active_orders: activeOrdersCountByUserId.get(String(u.id)) ?? 0,
-          assigned_games: assignedGames,
-          trust_score: trust.trust_score,
-          trust_badge: trust.trust_badge,
-          is_risky: trust.is_risky,
-        };
-      })
-      .filter(Boolean) as any[];
+    // =====================================================
+    // BUILD SELLERS
+    // =====================================================
+
+    let sellers =
+      (users ?? [])
+        .map((user: any) => {
+          const profile =
+            profileByUserId.get(
+              String(user.id)
+            )
+
+          if (!profile)
+            return null
+
+          const averageRating =
+            Number(
+              user.rating ??
+                profile.average_rating ??
+                0
+            )
+
+          const completedOrders =
+            Number(
+              user.completed_orders ??
+                profile.total_tasks_completed ??
+                0
+            )
+
+          const disputeCount =
+            Number(
+              user.dispute_count ??
+                0
+            )
+
+          const trust =
+            buildTrustSummary({
+              rating:
+                averageRating,
+
+              completed_orders:
+                completedOrders,
+
+              dispute_count:
+                disputeCount,
+            })
+
+          return {
+            id: String(user.id),
+
+            username:
+              user.username,
+
+            avatar_url:
+              user.avatar_url,
+
+            total_points:
+              Number(
+                user.points ?? 0
+              ),
+
+            business_name:
+              profile.business_name,
+
+            business_description:
+              profile.business_description,
+
+            total_tasks_completed:
+              completedOrders,
+
+            completed_orders:
+              completedOrders,
+
+            average_rating:
+              averageRating,
+
+            rating:
+              averageRating,
+
+            total_reviews:
+              Number(
+                user.total_reviews ??
+                  0
+              ),
+
+            dispute_count:
+              disputeCount,
+
+            fee_percentage:
+              Number(
+                profile.fee_percentage ??
+                  10
+              ),
+
+            active_orders:
+              activeOrdersMap.get(
+                String(user.id)
+              ) ?? 0,
+
+            assigned_categories:
+              categoriesBySeller.get(
+                String(user.id)
+              ) ?? [],
+
+            assigned_games:
+              gamesBySeller.get(
+                String(user.id)
+              ) ?? [],
+
+            trust_score:
+              trust.trust_score,
+
+            trust_badge:
+              trust.trust_badge,
+
+            is_risky:
+              trust.is_risky,
+          }
+        })
+        .filter(Boolean) as any[]
+
+    // =====================================================
+    // FILTER BY GAME
+    // =====================================================
 
     if (gameId) {
-      const sellerIdsForGame = new Set(
-        (assignments ?? [])
-          .filter((row: any) => String(row.game_id) === String(gameId))
-          .map((row: any) => String(row.seller_id))
-      );
-      sellers = sellers.filter((s) => {
-        const profile = profileByUserId.get(String(s.id));
-        return profile ? sellerIdsForGame.has(String(profile.id)) : false;
-      });
+      sellers = sellers.filter(
+        (seller) =>
+          seller.assigned_games.length >
+          0
+      )
     }
+
+    // =====================================================
+    // SORTING
+    // =====================================================
 
     if (sort === 'trust') {
-      sellers.sort((a, b) => {
-        if (b.trust_score !== a.trust_score) {
-          return b.trust_score - a.trust_score;
-        }
-
-        if (b.average_rating !== a.average_rating) {
-          return b.average_rating - a.average_rating;
-        }
-
-        return b.completed_orders - a.completed_orders;
-      });
-    } else if (sort === 'tasks') {
-      sellers.sort((a, b) => b.total_tasks_completed - a.total_tasks_completed);
-    } else if (sort === 'points') {
-      sellers.sort((a, b) => b.total_points - a.total_points);
+      sellers.sort(
+        (a, b) =>
+          b.trust_score -
+          a.trust_score
+      )
+    } else if (
+      sort === 'tasks'
+    ) {
+      sellers.sort(
+        (a, b) =>
+          b.total_tasks_completed -
+          a.total_tasks_completed
+      )
+    } else if (
+      sort === 'points'
+    ) {
+      sellers.sort(
+        (a, b) =>
+          b.total_points -
+          a.total_points
+      )
     } else {
-      sellers.sort((a, b) => b.average_rating - a.average_rating);
+      sellers.sort(
+        (a, b) =>
+          b.average_rating -
+          a.average_rating
+      )
     }
 
-    sellers = sellers.slice(0, limit);
+    sellers = sellers.slice(
+      0,
+      limit
+    )
 
     return NextResponse.json({
       success: true,
       sellers,
-    });
+    })
   } catch (error) {
-    console.error('Get sellers error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get('authorization');
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.substring(7);
-    const auth = verifyToken(token);
-
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { data: existingSeller, error: existingSellerError } = await supabase
-      .from('sellers')
-      .select('id')
-      .eq('user_id', auth.id)
-      .maybeSingle();
-
-    if (existingSellerError) {
-      console.error('Check existing seller error:', existingSellerError);
-      return NextResponse.json(
-        { error: existingSellerError.message },
-        { status: 500 }
-      );
-    }
-
-    if (existingSeller) {
-      return NextResponse.json(
-        { error: 'Seller profile already exists' },
-        { status: 400 }
-      );
-    }
-
-    const body = await request.json();
-    const { business_name, business_description } = body;
-
-    const { error: createSellerError } = await supabase
-      .from('sellers')
-      .insert({
-        user_id: auth.id,
-        business_name: business_name || null,
-        business_description: business_description || null,
-        verification_status: 'pending',
-      });
-
-    if (createSellerError) {
-      console.error('Create seller profile error:', createSellerError);
-      return NextResponse.json(
-        { error: createSellerError.message },
-        { status: 500 }
-      );
-    }
-
-    const { error: updateUserError } = await supabase
-      .from('users')
-      .update({ role: 'seller', is_verified: false })
-      .eq('id', auth.id);
-
-    if (updateUserError) {
-      console.error('Update user to seller error:', updateUserError);
-      return NextResponse.json(
-        { error: updateUserError.message },
-        { status: 500 }
-      );
-    }
+    console.error(
+      'Get sellers error:',
+      error
+    )
 
     return NextResponse.json(
       {
-        success: true,
-        message: 'Seller profile created. Awaiting admin verification.',
+        error:
+          'Internal server error',
       },
-      { status: 201 }
-    );
-  } catch (error) {
-    console.error('Create seller error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
       { status: 500 }
-    );
+    )
   }
 }
