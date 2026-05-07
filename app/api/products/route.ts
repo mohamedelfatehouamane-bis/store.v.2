@@ -129,8 +129,14 @@ export async function GET(
           points_price,
           is_active,
           created_at,
-          category_id,
-          game_id,
+          category:category_id(
+            id,
+            name,
+            game:game_id(
+              id,
+              name
+            )
+          ),
           status
         `,
         {
@@ -150,9 +156,52 @@ export async function GET(
     }
 
     if (gameId) {
-      query = query.eq(
-        'game_id',
-        gameId
+      const {
+        data: categoriesForGame,
+        error: categoriesForGameError,
+      } = await supabase
+        .from('categories')
+        .select('id')
+        .eq('game_id', gameId)
+
+      if (categoriesForGameError) {
+        console.error(
+          'Get products categories error:',
+          categoriesForGameError
+        )
+
+        return NextResponse.json(
+          {
+            error:
+              categoriesForGameError.message,
+          },
+          { status: 500 }
+        )
+      }
+
+      const categoryIdsForGame = Array.from(
+        new Set(
+          (categoriesForGame ?? [])
+            .map((category: any) => category.id)
+            .filter(Boolean)
+        )
+      )
+
+      if (categoryIdsForGame.length === 0) {
+        return NextResponse.json({
+          success: true,
+          products: [],
+          pagination: {
+            page: safePage,
+            limit: safeLimit,
+            total: 0,
+          },
+        })
+      }
+
+      query = query.in(
+        'category_id',
+        categoryIdsForGame
       )
     }
 
@@ -185,90 +234,6 @@ export async function GET(
 
     const productsRaw = data ?? []
 
-    // =====================================================
-    // LOAD GAMES
-    // =====================================================
-
-    const gameIds = Array.from(
-      new Set(
-        productsRaw
-          .map(
-            (product: any) =>
-              product.game_id
-          )
-          .filter(Boolean)
-      )
-    )
-
-    let gameMap: Record<
-      string,
-      any
-    > = {}
-
-    if (gameIds.length > 0) {
-      const {
-        data: games,
-      } = await supabase
-        .from('games')
-        .select('id, name')
-        .in('id', gameIds)
-
-      gameMap = Object.fromEntries(
-        (games ?? []).map(
-          (game: any) => [
-            game.id,
-            game,
-          ]
-        )
-      )
-    }
-
-    // =====================================================
-    // LOAD CATEGORIES
-    // =====================================================
-
-    const categoryIds = Array.from(
-      new Set(
-        productsRaw
-          .map(
-            (product: any) =>
-              product.category_id
-          )
-          .filter(Boolean)
-      )
-    )
-
-    let categoryMap: Record<
-      string,
-      any
-    > = {}
-
-    if (categoryIds.length > 0) {
-      const {
-        data: categories,
-      } = await supabase
-        .from('categories')
-        .select('id, name')
-        .in(
-          'id',
-          categoryIds
-        )
-
-      categoryMap =
-        Object.fromEntries(
-          (categories ?? []).map(
-            (category: any) => [
-              category.id,
-              category,
-            ]
-          )
-        )
-    }
-
-    // =====================================================
-    // NORMALIZE PRODUCTS
-    // =====================================================
-
     const products =
       productsRaw.map(
         (product: any) => ({
@@ -299,17 +264,25 @@ export async function GET(
             product.created_at,
 
           game:
-            product.game_id
-              ? gameMap[
-                  product.game_id
-                ] ?? null
+            product.category?.game
+              ? {
+                  id:
+                    product.category
+                      .game.id,
+                  name:
+                    product.category
+                      .game.name,
+                }
               : null,
 
           category:
-            product.category_id
-              ? categoryMap[
-                  product.category_id
-                ] ?? null
+            product.category
+              ? {
+                  id:
+                    product.category.id,
+                  name:
+                    product.category.name,
+                }
               : null,
         })
       )
@@ -591,9 +564,6 @@ export async function POST(
     // =====================================================
 
     const productPayload = {
-      game_id:
-        payload.game_id,
-
       category_id:
         payload.category_id,
 
