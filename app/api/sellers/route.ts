@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer as supabase } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
 import { buildTrustSummary } from '@/lib/trust-score'
 
 export async function GET(request: NextRequest) {
@@ -8,11 +7,13 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
 
     const sort =
-      searchParams.get('sort') || 'rating'
+      searchParams.get('sort') ||
+      'rating'
 
     const limit = Math.min(
       parseInt(
-        searchParams.get('limit') || '20'
+        searchParams.get('limit') ||
+          '20'
       ),
       100
     )
@@ -34,9 +35,9 @@ export async function GET(request: NextRequest) {
         username,
         avatar_url,
         points,
-        is_active,
         role,
         status,
+        is_active,
         rating,
         total_reviews,
         completed_orders,
@@ -63,8 +64,9 @@ export async function GET(request: NextRequest) {
     }
 
     const userIds =
-      (users ?? []).map((u: any) =>
-        String(u.id)
+      (users ?? []).map(
+        (user: any) =>
+          String(user.id)
       )
 
     if (userIds.length === 0) {
@@ -80,7 +82,7 @@ export async function GET(request: NextRequest) {
 
     const {
       data: sellerProfiles,
-      error: profilesError,
+      error: sellerProfilesError,
     } = await supabase
       .from('sellers')
       .select(`
@@ -94,29 +96,32 @@ export async function GET(request: NextRequest) {
       `)
       .in('user_id', userIds)
 
-    if (profilesError) {
+    if (
+      sellerProfilesError
+    ) {
       console.error(
-        'Get sellers profiles error:',
-        profilesError
+        'Get seller profiles error:',
+        sellerProfilesError
       )
 
       return NextResponse.json(
         {
           error:
-            profilesError.message,
+            sellerProfilesError.message,
         },
         { status: 500 }
       )
     }
 
-    const profiles =
-      sellerProfiles ?? []
-
     const profileByUserId =
       new Map(
-        profiles.map(
+        (
+          sellerProfiles ?? []
+        ).map(
           (profile: any) => [
-            String(profile.user_id),
+            String(
+              profile.user_id
+            ),
             profile,
           ]
         )
@@ -127,10 +132,12 @@ export async function GET(request: NextRequest) {
     // =====================================================
 
     const {
-      data: categoryAssignments,
-      error: categoryAssignmentsError,
+      data: assignments,
+      error: assignmentsError,
     } = await supabase
-      .from('seller_categories')
+      .from(
+        'seller_categories'
+      )
       .select(`
         seller_id,
         category_id
@@ -141,17 +148,17 @@ export async function GET(request: NextRequest) {
       )
 
     if (
-      categoryAssignmentsError
+      assignmentsError
     ) {
       console.error(
-        'Get seller category assignments error:',
-        categoryAssignmentsError
+        'Get seller assignments error:',
+        assignmentsError
       )
 
       return NextResponse.json(
         {
           error:
-            categoryAssignmentsError.message,
+            assignmentsError.message,
         },
         { status: 500 }
       )
@@ -165,7 +172,7 @@ export async function GET(request: NextRequest) {
       Array.from(
         new Set(
           (
-            categoryAssignments ??
+            assignments ??
             []
           ).map(
             (assignment: any) =>
@@ -176,7 +183,9 @@ export async function GET(request: NextRequest) {
 
     let categories: any[] = []
 
-    if (categoryIds.length > 0) {
+    if (
+      categoryIds.length > 0
+    ) {
       const {
         data:
           categoriesData,
@@ -251,7 +260,7 @@ export async function GET(request: NextRequest) {
       )
 
     // =====================================================
-    // BUILD SELLER CATEGORY/GAME MAPS
+    // BUILD MAPS
     // =====================================================
 
     const categoriesBySeller =
@@ -263,10 +272,10 @@ export async function GET(request: NextRequest) {
     const gamesBySeller =
       new Map<
         string,
-        string[]
+        any[]
       >()
 
-    for (const assignment of categoryAssignments ??
+    for (const assignment of assignments ??
       []) {
       const sellerId = String(
         assignment.seller_id
@@ -279,7 +288,10 @@ export async function GET(request: NextRequest) {
           )
         )
 
-      if (!category) continue
+      if (!category)
+        continue
+
+      // categories
 
       const currentCategories =
         categoriesBySeller.get(
@@ -295,6 +307,8 @@ export async function GET(request: NextRequest) {
         sellerId,
         currentCategories
       )
+
+      // games
 
       const gameName =
         gameMap.get(
@@ -332,7 +346,7 @@ export async function GET(request: NextRequest) {
 
     const {
       data: activeOrders,
-      error: ordersError,
+      error: activeOrdersError,
     } = await supabase
       .from('orders')
       .select(
@@ -347,16 +361,18 @@ export async function GET(request: NextRequest) {
         userIds
       )
 
-    if (ordersError) {
+    if (
+      activeOrdersError
+    ) {
       console.error(
-        'Get sellers active orders error:',
-        ordersError
+        'Get active orders error:',
+        activeOrdersError
       )
 
       return NextResponse.json(
         {
           error:
-            ordersError.message,
+            activeOrdersError.message,
         },
         { status: 500 }
       )
@@ -403,7 +419,7 @@ export async function GET(request: NextRequest) {
           if (!profile)
             return null
 
-          const averageRating =
+          const rating =
             Number(
               user.rating ??
                 profile.average_rating ??
@@ -425,8 +441,7 @@ export async function GET(request: NextRequest) {
 
           const trust =
             buildTrustSummary({
-              rating:
-                averageRating,
+              rating,
 
               completed_orders:
                 completedOrders,
@@ -462,10 +477,9 @@ export async function GET(request: NextRequest) {
               completedOrders,
 
             average_rating:
-              averageRating,
+              rating,
 
-            rating:
-              averageRating,
+            rating,
 
             total_reviews:
               Number(
@@ -510,19 +524,19 @@ export async function GET(request: NextRequest) {
         .filter(Boolean) as any[]
 
     // =====================================================
-    // FILTER BY GAME
+    // FILTER
     // =====================================================
 
     if (gameId) {
       sellers = sellers.filter(
         (seller) =>
-          seller.assigned_games.length >
-          0
+          seller.assigned_games
+            .length > 0
       )
     }
 
     // =====================================================
-    // SORTING
+    // SORT
     // =====================================================
 
     if (sort === 'trust') {
