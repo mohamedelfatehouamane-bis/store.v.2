@@ -10,9 +10,9 @@ const updateUserSchema = z.object({
   role: z.enum(['customer', 'seller', 'admin']),
   total_points: z.number().finite().min(0),
   is_active: z.boolean(),
-  is_verified: z.boolean(),
+  status: z.enum(['pending', 'approved', 'rejected']),
   seller_fee_percentage: z.number().finite().min(0).max(100).optional(),
-  rejection_reason: z.string().min(1).optional(),
+  rejection_reason: z.string().optional(),
 })
 
 export async function GET(request: NextRequest) {
@@ -45,90 +45,101 @@ export async function GET(request: NextRequest) {
     }
 
     const usersData = (data ?? []) as any[]
+
     const sellerUserIds = usersData
       .filter((user) => user.role === 'seller')
       .map((user) => user.id)
 
-    const verificationMap = new Map<string, string>()
-    const rejectionReasonMap = new Map<string, string | null>()
     const sellerFeeMap = new Map<string, number>()
-    const assignedGamesMap = new Map<string, string[]>()
+    const rejectionReasonMap = new Map<string, string | null>()
+    const assignedCategoriesMap = new Map<string, string[]>()
 
     if (sellerUserIds.length > 0) {
       const { data: sellers, error: sellersError } = await supabase
         .from('sellers')
-        .select('id, user_id, verification_status, rejection_reason, fee_percentage')
+        .select('id, user_id, fee_percentage, rejection_reason')
         .in('user_id', sellerUserIds)
 
       const sellerIdToUserId = new Map<string, string>()
 
       if (sellersError) {
-        console.error('Seller verification query error:', sellersError)
+        console.error('Seller query error:', sellersError)
       } else {
-        (sellers ?? []).forEach((seller: any) => {
+        ;(sellers ?? []).forEach((seller: any) => {
           sellerIdToUserId.set(seller.id, seller.user_id)
-          verificationMap.set(
+
+          sellerFeeMap.set(
             seller.user_id,
-            seller.verification_status ?? 'pending'
+            Number(seller.fee_percentage ?? 10)
           )
+
           rejectionReasonMap.set(
             seller.user_id,
             seller.rejection_reason ?? null
           )
-          sellerFeeMap.set(seller.user_id, Number(seller.fee_percentage ?? 10))
         })
       }
 
       const sellerIds = (sellers ?? []).map((seller: any) => seller.id)
 
-      const { data: sellerGames, error: sellerGamesError } = sellerIds.length
-        ? await supabase
-            .from('seller_games')
-            .select('seller_id, game_id')
-            .in('seller_id', sellerIds)
-        : { data: [], error: null }
+      const { data: sellerCategories, error: sellerCategoriesError } =
+        sellerIds.length
+          ? await supabase
+              .from('seller_categories')
+              .select('seller_id, category_id')
+              .in('seller_id', sellerIds)
+          : { data: [], error: null }
 
-      if (sellerGamesError) {
-        console.error('Seller games query error:', sellerGamesError)
+      if (sellerCategoriesError) {
+        console.error(
+          'Seller categories query error:',
+          sellerCategoriesError
+        )
       } else {
-        const gameIds = Array.from(
-          new Set((sellerGames ?? []).map((item: any) => item.game_id))
+        const categoryIds = Array.from(
+          new Set(
+            (sellerCategories ?? []).map(
+              (item: any) => item.category_id
+            )
+          )
         )
 
-        const { data: gamesData, error: gamesError } = await supabase
-          .from('games')
-          .select('id, name')
-          .in('id', gameIds)
+        const { data: categoriesData, error: categoriesError } =
+          await supabase
+            .from('categories')
+            .select('id, name')
+            .in('id', categoryIds)
 
-        const gameMap = new Map<string, string>()
-        if (!gamesError) {
-          (gamesData ?? []).forEach((game: any) => {
-            gameMap.set(game.id, game.name)
+        const categoryMap = new Map<string, string>()
+
+        if (!categoriesError) {
+          ;(categoriesData ?? []).forEach((category: any) => {
+            categoryMap.set(category.id, category.name)
           })
         }
 
-        ;(sellerGames ?? []).forEach((item: any) => {
+        ;(sellerCategories ?? []).forEach((item: any) => {
           const userId = sellerIdToUserId.get(item.seller_id)
-          if (!userId) {
-            return
+
+          if (!userId) return
+
+          const categories =
+            assignedCategoriesMap.get(userId) ?? []
+
+          const categoryName = categoryMap.get(item.category_id)
+
+          if (categoryName) {
+            categories.push(categoryName)
           }
 
-          const games = assignedGamesMap.get(userId) ?? []
-          const gameName = gameMap.get(item.game_id)
-          if (gameName) {
-            games.push(gameName)
-          }
-          assignedGamesMap.set(userId, games)
+          assignedCategoriesMap.set(userId, categories)
         })
 
         if (DEBUG_USERS_API) {
-          console.log('[api/users] seller game mapping', {
+          console.log('[api/users] seller category mapping', {
             sellerUsersCount: sellerUserIds.length,
-            sellersCount: (sellers ?? []).length,
-            sellerGamesCount: (sellerGames ?? []).length,
-            mappedUsersWithGames: Array.from(assignedGamesMap.entries()).map(
-              ([userId, games]) => ({ userId, gamesCount: games.length })
-            ),
+            sellerCategoriesCount:
+              (sellerCategories ?? []).length,
           })
         }
       }
@@ -136,38 +147,34 @@ export async function GET(request: NextRequest) {
 
     const users = usersData.map((user: any) => ({
       ...user,
-      total_points: Number(user.points ?? 0),
+
+      total_points: Number(
+        user.points ?? user.balance ?? 0
+      ),
+
       is_active: user.is_active ?? true,
-      is_verified: user.is_verified ?? false,
-      verification_status:
+
+      status:
         user.role === 'seller'
-          ? verificationMap.get(user.id) || 'pending'
+          ? user.status ?? 'pending'
           : undefined,
+
       rejection_reason:
         user.role === 'seller'
           ? rejectionReasonMap.get(user.id) ?? null
           : null,
+
       seller_fee_percentage:
         user.role === 'seller'
           ? sellerFeeMap.get(user.id) ?? 10
           : undefined,
-      assigned_games: assignedGamesMap.get(user.id) ?? [],
-      selected_games: assignedGamesMap.get(user.id) ?? [],
-    }))
 
-    if (DEBUG_USERS_API) {
-      console.log(
-        '[api/users] sellers payload snapshot',
-        users
-          .filter((u: any) => u.role === 'seller')
-          .map((u: any) => ({
-            id: u.id,
-            username: u.username,
-            assigned_games: u.assigned_games,
-            selected_games: u.selected_games,
-          }))
-      )
-    }
+      assigned_categories:
+        assignedCategoriesMap.get(user.id) ?? [],
+
+      selected_categories:
+        assignedCategoriesMap.get(user.id) ?? [],
+    }))
 
     return NextResponse.json({
       success: true,
@@ -175,13 +182,12 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Get users error:', error)
+
     return NextResponse.json(
       {
         error:
           error instanceof Error
             ? error.message
-            : typeof error === 'string'
-            ? error
             : 'Internal server error',
       },
       { status: 500 }
@@ -208,119 +214,90 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json()
+
     const payload = updateUserSchema.parse(body)
 
-    const { data: existingUser, error: userError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', payload.id)
-      .single()
+    const { data: existingUser, error: userError } =
+      await supabase
+        .from('users')
+        .select('*')
+        .eq('id', payload.id)
+        .single()
 
     if (userError || !existingUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    }
-
-    if (payload.id === auth.id) {
-      if (payload.role !== existingUser.role) {
-        return NextResponse.json(
-          { error: 'Admins cannot change their own role' },
-          { status: 400 }
-        )
-      }
-
-      if ('is_active' in existingUser && payload.is_active !== (existingUser.is_active ?? true)) {
-        return NextResponse.json(
-          { error: 'Admins cannot deactivate their own account' },
-          { status: 400 }
-        )
-      }
-    }
-
-    if (payload.role === 'seller' && !payload.is_verified && !payload.rejection_reason) {
       return NextResponse.json(
-        {
-          error: 'Rejection reason is required when rejecting a seller',
-        },
-        { status: 400 }
+        { error: 'User not found' },
+        { status: 404 }
       )
     }
 
-    const updateData: Record<string, unknown> = {}
-
-    if ('role' in existingUser) {
-      updateData.role = payload.role
+    const updateData: Record<string, unknown> = {
+      role: payload.role,
+      points: payload.total_points,
+      is_active: payload.is_active,
     }
 
-    if ('points' in existingUser) {
-      updateData.points = payload.total_points
+    if (payload.role === 'seller') {
+      updateData.status = payload.status
     }
 
-    if ('balance' in existingUser) {
-      updateData.balance = payload.total_points
-    }
-
-    if ('is_active' in existingUser) {
-      updateData.is_active = payload.is_active
-    }
-
-    if ('is_verified' in existingUser) {
-      updateData.is_verified = payload.is_verified
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return NextResponse.json(
-        { error: 'No editable fields found for this user' },
-        { status: 400 }
-      )
-    }
-
-    const { data: updatedUser, error: updateError } = await supabase
-      .from('users')
-      .update(updateData)
-      .eq('id', payload.id)
-      .select('*')
-      .single()
+    const { data: updatedUser, error: updateError } =
+      await supabase
+        .from('users')
+        .update(updateData)
+        .eq('id', payload.id)
+        .select('*')
+        .single()
 
     if (updateError || !updatedUser) {
       console.error('Update user error:', updateError)
+
       return NextResponse.json(
-        { error: updateError?.message ?? 'Unable to update user' },
+        {
+          error:
+            updateError?.message ??
+            'Unable to update user',
+        },
         { status: 500 }
       )
     }
 
     if (payload.role === 'seller') {
-      const verificationStatus = payload.is_verified ? 'verified' : 'rejected'
       const sellerUpdateData: Record<string, unknown> = {
-        verification_status: verificationStatus,
-        fee_percentage: payload.seller_fee_percentage ?? 10,
+        fee_percentage:
+          payload.seller_fee_percentage ?? 10,
+
+        rejection_reason:
+          payload.status === 'rejected'
+            ? payload.rejection_reason ?? null
+            : null,
       }
 
-      if (payload.is_verified) {
-        sellerUpdateData.rejection_reason = null
-      } else if (payload.rejection_reason) {
-        sellerUpdateData.rejection_reason = payload.rejection_reason
-      }
-
-      const { error: sellerUpdateError } = await supabase
-        .from('sellers')
-        .update(sellerUpdateData)
-        .eq('user_id', payload.id)
+      const { error: sellerUpdateError } =
+        await supabase
+          .from('sellers')
+          .update(sellerUpdateData)
+          .eq('user_id', payload.id)
 
       if (sellerUpdateError) {
-        console.error('Update seller verification status error:', sellerUpdateError)
+        console.error(
+          'Seller update error:',
+          sellerUpdateError
+        )
       }
     }
 
     return NextResponse.json({
       success: true,
+
       user: {
         ...updatedUser,
-        total_points: Number(updatedUser.points ?? updatedUser.balance ?? 0),
-        is_active: updatedUser.is_active ?? true,
-        is_verified: updatedUser.is_verified ?? false,
-        seller_fee_percentage:
-          payload.role === 'seller' ? payload.seller_fee_percentage ?? 10 : undefined,
+
+        total_points: Number(
+          updatedUser.points ??
+            updatedUser.balance ??
+            0
+        ),
       },
     })
   } catch (error) {
@@ -328,7 +305,10 @@ export async function PUT(request: NextRequest) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
+        {
+          error: 'Validation error',
+          details: error.errors,
+        },
         { status: 400 }
       )
     }
@@ -338,8 +318,6 @@ export async function PUT(request: NextRequest) {
         error:
           error instanceof Error
             ? error.message
-            : typeof error === 'string'
-            ? error
             : 'Internal server error',
       },
       { status: 500 }
