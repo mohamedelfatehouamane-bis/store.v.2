@@ -38,8 +38,6 @@ type ProfileUser = {
 
   assigned_category_ids?: string[]
 
-  assigned_games?: string[]
-
   average_rating?: number
 
   total_reviews?: number
