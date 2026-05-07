@@ -24,6 +24,10 @@ import {
   Zap,
   ClipboardList,
   ShoppingBag,
+  Users,
+  CreditCard,
+  Package,
+  User,
 } from 'lucide-react';
 
 type OrderItem = {
@@ -227,8 +231,7 @@ export default function DashboardPage() {
         </h1>
 
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 sm:text-base">
-          Manage your orders and grow your
-          game services business.
+          Manage your dashboard and orders.
         </p>
       </div>
 
@@ -262,55 +265,167 @@ export default function DashboardPage() {
           Quick Actions
         </h2>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Link href="/dashboard/seller/earnings">
-            <Card className="cursor-pointer transition hover:border-emerald-500">
-              <CardContent className="flex flex-col items-center justify-center py-6">
-                <DollarSign className="mb-2 h-6 w-6 text-emerald-500" />
+        {/* SELLER */}
 
-                <span className="font-medium">
-                  Withdraw Earnings
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
+        {user?.role === 'seller' && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Link href="/dashboard/earnings">
+              <Card className="cursor-pointer transition hover:border-emerald-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <DollarSign className="mb-2 h-6 w-6 text-emerald-500" />
 
-          <Link href="/dashboard/orders?filter=ongoing">
-            <Card className="cursor-pointer transition hover:border-blue-500">
-              <CardContent className="flex flex-col items-center justify-center py-6">
-                <Zap className="mb-2 h-6 w-6 text-blue-500" />
+                  <span className="font-medium">
+                    Withdraw Earnings
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
 
-                <span className="font-medium">
-                  View Ongoing Orders
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
+            <Link href="/dashboard/orders/available">
+              <Card className="cursor-pointer transition hover:border-blue-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <ShoppingBag className="mb-2 h-6 w-6 text-blue-500" />
 
-          <Link href="/dashboard/orders?filter=completed">
-            <Card className="cursor-pointer transition hover:border-cyan-500">
-              <CardContent className="flex flex-col items-center justify-center py-6">
-                <ClipboardList className="mb-2 h-6 w-6 text-cyan-500" />
+                  <span className="font-medium">
+                    Pick Orders
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
 
-                <span className="font-medium">
-                  View Completed Orders
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
+            <Link href="/dashboard/orders?filter=active">
+              <Card className="cursor-pointer transition hover:border-orange-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <Zap className="mb-2 h-6 w-6 text-orange-500" />
 
-          <Link href="/shop">
-            <Card className="cursor-pointer transition hover:border-fuchsia-500">
-              <CardContent className="flex flex-col items-center justify-center py-6">
-                <ShoppingBag className="mb-2 h-6 w-6 text-fuchsia-500" />
+                  <span className="font-medium">
+                    Active Orders
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
 
-                <span className="font-medium">
-                  Browse Shop
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
+            <Link href="/dashboard/orders?filter=completed">
+              <Card className="cursor-pointer transition hover:border-cyan-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <ClipboardList className="mb-2 h-6 w-6 text-cyan-500" />
+
+                  <span className="font-medium">
+                    Completed Orders
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
+        )}
+
+        {/* ADMIN */}
+
+        {user?.role === 'admin' && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Link href="/dashboard/admin/withdrawals">
+              <Card className="cursor-pointer transition hover:border-emerald-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <DollarSign className="mb-2 h-6 w-6 text-emerald-500" />
+
+                  <span className="font-medium">
+                    Withdrawal Requests
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/dashboard/admin/topups">
+              <Card className="cursor-pointer transition hover:border-yellow-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <CreditCard className="mb-2 h-6 w-6 text-yellow-500" />
+
+                  <span className="font-medium">
+                    Top-Up Requests
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/dashboard/admin/users">
+              <Card className="cursor-pointer transition hover:border-blue-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <Users className="mb-2 h-6 w-6 text-blue-500" />
+
+                  <span className="font-medium">
+                    User Management
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/dashboard/admin/orders">
+              <Card className="cursor-pointer transition hover:border-cyan-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <Package className="mb-2 h-6 w-6 text-cyan-500" />
+
+                  <span className="font-medium">
+                    Order Management
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
+        )}
+
+        {/* CUSTOMER */}
+
+        {user?.role === 'customer' && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Link href="/dashboard/orders">
+              <Card className="cursor-pointer transition hover:border-orange-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <Zap className="mb-2 h-6 w-6 text-orange-500" />
+
+                  <span className="font-medium">
+                    Ongoing Orders
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/shop">
+              <Card className="cursor-pointer transition hover:border-fuchsia-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <ShoppingBag className="mb-2 h-6 w-6 text-fuchsia-500" />
+
+                  <span className="font-medium">
+                    Browse Shop
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/dashboard/topup">
+              <Card className="cursor-pointer transition hover:border-yellow-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <DollarSign className="mb-2 h-6 w-6 text-yellow-500" />
+
+                  <span className="font-medium">
+                    Top Up Points
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/dashboard/profile">
+              <Card className="cursor-pointer transition hover:border-cyan-500">
+                <CardContent className="flex flex-col items-center justify-center py-6">
+                  <User className="mb-2 h-6 w-6 text-cyan-500" />
+
+                  <span className="font-medium">
+                    Profile
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* STATS */}
@@ -389,77 +504,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* RECENT ORDERS */}
-
-      <div className="mt-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Recent Orders
-            </CardTitle>
-
-            <CardDescription>
-              Latest activity from your orders
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent>
-            {recentOrders.length === 0 ? (
-              <div className="py-10 text-center text-slate-500">
-                No recent orders found.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {recentOrders.map(
-                  (order) => (
-                    <div
-                      key={order.id}
-                      className="flex items-center justify-between rounded-lg border p-4"
-                    >
-                      <div>
-                        <div className="font-medium">
-                          {order.product_name ??
-                            'Order'}
-                        </div>
-
-                        <div className="text-sm text-slate-500">
-                          {
-                            order.game_name
-                          }
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div
-                          className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${statusBadgeClass(
-                            order.status
-                          )}`}
-                        >
-                          {order.status}
-                        </div>
-
-                        <div className="mt-1 text-sm font-semibold">
-                          {
-                            order.points_price
-                          }{' '}
-                          pts
-                        </div>
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {error && (
-        <div className="mt-6 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          {error}
-        </div>
-      )}
     </div>
   );
 }
