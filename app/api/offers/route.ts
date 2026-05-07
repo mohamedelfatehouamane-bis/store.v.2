@@ -13,19 +13,18 @@ export async function GET(request: NextRequest) {
     }
 
     if (sellerId) {
-      const { data: assignments, error: assignmentError } = await supabase
+      const { count: assignmentCount, error: assignmentError } = await supabase
         .from('seller_categories')
-        .select('seller_id')
+        .select('*', { count: 'exact', head: true })
         .eq('seller_id', sellerId)
         .eq('category_id', categoryId)
-        .limit(1)
 
       if (assignmentError) {
         console.error('Offers API seller assignment error:', assignmentError)
         return NextResponse.json({ offers: [] }, { status: 500 })
       }
 
-      if (!assignments || assignments.length === 0) {
+      if (!assignmentCount) {
         return NextResponse.json({ offers: [] })
       }
     }
