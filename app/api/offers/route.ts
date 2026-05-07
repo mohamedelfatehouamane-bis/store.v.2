@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     if (sellerId) {
       const { data: assignments, error: assignmentError } = await supabase
         .from('seller_categories')
-        .select('id')
+        .select('seller_id')
         .eq('seller_id', sellerId)
         .eq('category_id', categoryId)
         .limit(1)
