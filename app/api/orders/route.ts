@@ -12,24 +12,16 @@ const createOrderSchema = z.object({
 })
 
 function getAuth(request: NextRequest) {
-  const authHeader =
-    request.headers.get('authorization')
+  const authHeader = request.headers.get('authorization')
 
-  if (
-    !authHeader ||
-    !authHeader.startsWith('Bearer ')
-  ) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return null
   }
 
-  return verifyToken(
-    authHeader.substring(7)
-  )
+  return verifyToken(authHeader.substring(7))
 }
 
-export async function POST(
-  request: NextRequest
-) {
+export async function POST(request: NextRequest) {
   try {
     const auth = getAuth(request)
 
@@ -45,8 +37,7 @@ export async function POST(
     if (auth.role !== 'customer') {
       return NextResponse.json(
         {
-          error:
-            'Only customers can create orders',
+          error: 'Only customers can create orders',
         },
         { status: 403 }
       )
@@ -75,27 +66,14 @@ export async function POST(
         points_price,
         category_id,
         game_id,
-        is_active,
-
-        games (
-          id,
-          name
-        ),
-
-        categories (
-          id,
-          name
-        )
+        is_active
       `)
       .eq('id', product_id)
       .eq('is_active', true)
       .single()
 
     if (productError || !product) {
-      console.error(
-        'Product query error:',
-        productError
-      )
+      console.error('Product query error:', productError)
 
       return NextResponse.json(
         {
@@ -109,14 +87,10 @@ export async function POST(
     // VALIDATE GAME
     // =====================================================
 
-    if (
-      String(product.game_id) !==
-      String(game_id)
-    ) {
+    if (String(product.game_id) !== String(game_id)) {
       return NextResponse.json(
         {
-          error:
-            'Selected product does not belong to this game',
+          error: 'Selected product does not belong to this game',
         },
         { status: 400 }
       )
@@ -131,13 +105,8 @@ export async function POST(
       error: assignmentsError,
     } = await db
       .from('seller_categories')
-      .select(`
-        seller_id
-      `)
-      .eq(
-        'category_id',
-        product.category_id
-      )
+      .select('seller_id')
+      .eq('category_id', product.category_id)
 
     if (assignmentsError) {
       console.error(
@@ -147,33 +116,27 @@ export async function POST(
 
       return NextResponse.json(
         {
-          error:
-            'Unable to load category sellers',
+          error: 'Unable to load category sellers',
         },
         { status: 500 }
       )
     }
 
-    if (
-      !assignments ||
-      assignments.length === 0
-    ) {
+    if (!assignments || assignments.length === 0) {
       return NextResponse.json(
         {
-          error:
-            'No sellers assigned to this category',
+          error: 'No sellers assigned to this category',
         },
         { status: 400 }
       )
     }
 
     // =====================================================
-    // GET VALID SELLERS
+    // GET APPROVED SELLERS
     // =====================================================
 
     const sellerIds = assignments.map(
-      (assignment: any) =>
-        String(assignment.seller_id)
+      (assignment: any) => assignment.seller_id
     )
 
     const {
@@ -189,53 +152,23 @@ export async function POST(
       `)
       .in('id', sellerIds)
       .eq('role', 'seller')
+      .eq('status', 'approved')
 
     if (sellersError) {
-      console.error(
-        'Seller query error:',
-        sellersError
-      )
+      console.error('Seller query error:', sellersError)
 
       return NextResponse.json(
         {
-          error:
-            'Unable to load sellers',
+          error: 'Unable to load sellers',
         },
         { status: 500 }
       )
     }
 
-    if (
-      !sellers ||
-      sellers.length === 0
-    ) {
+    if (!sellers || sellers.length === 0) {
       return NextResponse.json(
         {
-          error:
-            'No valid sellers found',
-        },
-        { status: 400 }
-      )
-    }
-
-    // =====================================================
-    // FILTER APPROVED SELLERS
-    // =====================================================
-
-    const approvedSellers =
-      sellers.filter(
-        (seller: any) =>
-          seller.status ===
-          'approved'
-      )
-
-    if (
-      approvedSellers.length === 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            'No approved sellers available',
+          error: 'No approved sellers available',
         },
         { status: 400 }
       )
@@ -245,11 +178,7 @@ export async function POST(
     // PICK SELLER
     // =====================================================
 
-    const selectedSeller =
-      approvedSellers[0]
-
-    const assignedSellerId =
-      selectedSeller.id
+    const selectedSeller = sellers[0]
 
     // =====================================================
     // VERIFY GAME ACCOUNT
@@ -269,34 +198,26 @@ export async function POST(
       .eq('user_id', auth.id)
       .single()
 
-    if (
-      gameAccountError ||
-      !gameAccount
-    ) {
+    if (gameAccountError || !gameAccount) {
       return NextResponse.json(
         {
-          error:
-            'Game account not found',
+          error: 'Game account not found',
         },
         { status: 404 }
       )
     }
 
-    if (
-      String(gameAccount.game_id) !==
-      String(game_id)
-    ) {
+    if (String(gameAccount.game_id) !== String(game_id)) {
       return NextResponse.json(
         {
-          error:
-            'Game account mismatch',
+          error: 'Game account mismatch',
         },
         { status: 400 }
       )
     }
 
     // =====================================================
-    // VERIFY CUSTOMER BALANCE
+    // GET CUSTOMER
     // =====================================================
 
     const {
@@ -311,43 +232,32 @@ export async function POST(
       .eq('id', auth.id)
       .single()
 
-    if (
-      customerError ||
-      !customer
-    ) {
+    if (customerError || !customer) {
       return NextResponse.json(
         {
-          error:
-            'Customer not found',
+          error: 'Customer not found',
         },
         { status: 404 }
       )
     }
 
-    const pointsPrice = Number(
-      product.points_price
-    )
+    const pointsPrice = Number(product.points_price ?? 0)
 
-    if (
-      Number(customer.points) <
-      pointsPrice
-    ) {
+    if (Number(customer.points) < pointsPrice) {
       return NextResponse.json(
         {
-          error:
-            'Insufficient points',
+          error: 'Insufficient points',
         },
         { status: 400 }
       )
     }
 
     // =====================================================
-    // DEDUCT POINTS
+    // DEDUCT CUSTOMER POINTS
     // =====================================================
 
     const newBalance =
-      Number(customer.points) -
-      pointsPrice
+      Number(customer.points) - pointsPrice
 
     const {
       error: balanceError,
@@ -366,8 +276,7 @@ export async function POST(
 
       return NextResponse.json(
         {
-          error:
-            'Unable to deduct points',
+          error: 'Unable to deduct points',
         },
         { status: 500 }
       )
@@ -376,9 +285,6 @@ export async function POST(
     // =====================================================
     // CREATE ORDER
     // =====================================================
-
-    const sellerEarnings =
-      pointsPrice
 
     const {
       data: order,
@@ -389,7 +295,7 @@ export async function POST(
         customer_id: auth.id,
 
         assigned_seller_id:
-          assignedSellerId,
+          selectedSeller.id,
 
         product_id: product.id,
 
@@ -400,16 +306,12 @@ export async function POST(
           pointsPrice,
 
         seller_earnings:
-          sellerEarnings,
+          pointsPrice,
 
         status: 'pending',
 
         product_name:
           product.name,
-
-        game_name:
-          product.games?.name ??
-          '',
 
         category_id:
           product.category_id,
@@ -424,12 +326,10 @@ export async function POST(
       )
 
       // REFUND CUSTOMER
-
       await db
         .from('users')
         .update({
-          points:
-            Number(customer.points),
+          points: Number(customer.points),
         })
         .eq('id', auth.id)
 
@@ -454,11 +354,9 @@ export async function POST(
 
         amount: -pointsPrice,
 
-        transaction_type:
-          'spend',
+        transaction_type: 'spend',
 
-        related_order_id:
-          order.id,
+        related_order_id: order.id,
 
         description: `Purchased ${product.name}`,
       })
@@ -471,25 +369,17 @@ export async function POST(
       { status: 201 }
     )
   } catch (error) {
-    if (
-      error instanceof z.ZodError
-    ) {
+    if (error instanceof z.ZodError) {
       return NextResponse.json(
         {
-          error:
-            'Validation error',
-
-          details:
-            error.errors,
+          error: 'Validation error',
+          details: error.errors,
         },
         { status: 400 }
       )
     }
 
-    console.error(
-      'Create order error:',
-      error
-    )
+    console.error('Create order error:', error)
 
     return NextResponse.json(
       {
