@@ -831,7 +831,7 @@ export default function OrderDetailsPage() {
   const [showCompletionAnimation, setShowCompletionAnimation] = useState(false)
 
   const lastOrderSnapshotRef = useRef<string>('')
-  const previousOrderStatusRef = useRef<string | null>(null)
+  const previousNormalizedStatusRef = useRef<string | null>(null)
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
 
   const {
@@ -1071,7 +1071,7 @@ export default function OrderDetailsPage() {
   useEffect(() => {
     const normalizedStatus = normalizeStatus(order?.status)
     if (!normalizedStatus) return
-    const previousStatus = previousOrderStatusRef.current
+    const previousStatus = previousNormalizedStatusRef.current
 
     if (
       previousStatus !== null &&
@@ -1081,7 +1081,7 @@ export default function OrderDetailsPage() {
       setShowCompletionAnimation(true)
     }
 
-    previousOrderStatusRef.current = normalizedStatus
+    previousNormalizedStatusRef.current = normalizedStatus
   }, [order?.status])
 
   useEffect(() => {
@@ -1308,7 +1308,7 @@ export default function OrderDetailsPage() {
       section.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
-    console.warn('Order review section is not available, redirecting to orders list.')
+    console.warn('Order review section not found in DOM, likely because order is not in completed status. Redirecting to orders list.')
     router.push('/dashboard/orders')
   }, [router])
 
