@@ -23,11 +23,13 @@ const CONFETTI_PARTICLES = [
   { x: 56, y: -26, color: 'bg-emerald-400', delay: 260 },
 ]
 
+const NOOP = () => {}
+
 export function OrderCompleteAnimation({
   open,
   onOpenChange,
-  onLeaveReview = () => {},
-  onBackToOrders = () => {},
+  onLeaveReview = NOOP,
+  onBackToOrders = NOOP,
   autoHideDurationMs = 3000,
 }: OrderCompleteAnimationProps) {
   const [isMounted, setIsMounted] = useState(open)
