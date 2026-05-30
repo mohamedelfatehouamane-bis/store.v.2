@@ -831,7 +831,7 @@ export default function OrderDetailsPage() {
   const [showCompletionAnimation, setShowCompletionAnimation] = useState(false)
 
   const lastOrderSnapshotRef = useRef<string>('')
-  const previousOrderStatusRef = useRef<string>('')
+  const previousOrderStatusRef = useRef<string | null>(null)
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
 
   const {
@@ -1074,7 +1074,7 @@ export default function OrderDetailsPage() {
     const previousStatus = previousOrderStatusRef.current
 
     if (
-      previousStatus !== '' &&
+      previousStatus !== null &&
       previousStatus !== ORDER_STATUS.COMPLETED &&
       normalizedStatus === ORDER_STATUS.COMPLETED
     ) {
@@ -1308,6 +1308,7 @@ export default function OrderDetailsPage() {
       section.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
+    console.warn('Order review section is not available, redirecting to orders list.')
     router.push('/dashboard/orders')
   }, [router])
 
