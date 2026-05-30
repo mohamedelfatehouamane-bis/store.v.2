@@ -34,13 +34,20 @@ export function OrderCompleteAnimation({
 }: OrderCompleteAnimationProps) {
   const [isMounted, setIsMounted] = useState(open)
   const [isVisible, setIsVisible] = useState(open)
-  const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
-  const unmountTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const unmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (open) {
       setIsMounted(true)
-      requestAnimationFrame(() => setIsVisible(true))
+      if (animationFrameRef.current) {
+        window.cancelAnimationFrame(animationFrameRef.current)
+      }
+      animationFrameRef.current = window.requestAnimationFrame(() => {
+        setIsVisible(true)
+        animationFrameRef.current = null
+      })
       return
     }
 
@@ -82,6 +89,9 @@ export function OrderCompleteAnimation({
       }
       if (unmountTimerRef.current) {
         window.clearTimeout(unmountTimerRef.current)
+      }
+      if (animationFrameRef.current) {
+        window.cancelAnimationFrame(animationFrameRef.current)
       }
     }
   }, [])
