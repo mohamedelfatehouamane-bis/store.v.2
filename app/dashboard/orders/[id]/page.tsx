@@ -1071,10 +1071,11 @@ export default function OrderDetailsPage() {
   useEffect(() => {
     const normalizedStatus = normalizeStatus(order?.status)
     if (!normalizedStatus) return
+    const previousStatus = previousOrderStatusRef.current
 
     if (
-      previousOrderStatusRef.current &&
-      previousOrderStatusRef.current !== ORDER_STATUS.COMPLETED &&
+      previousStatus !== '' &&
+      previousStatus !== ORDER_STATUS.COMPLETED &&
       normalizedStatus === ORDER_STATUS.COMPLETED
     ) {
       setShowCompletionAnimation(true)

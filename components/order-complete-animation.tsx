@@ -9,7 +9,7 @@ type OrderCompleteAnimationProps = {
   onOpenChange: (open: boolean) => void
   onLeaveReview?: () => void
   onBackToOrders?: () => void
-  autoHideMs?: number
+  autoHideDurationMs?: number
 }
 
 const CONFETTI_PARTICLES = [
@@ -28,7 +28,7 @@ export function OrderCompleteAnimation({
   onOpenChange,
   onLeaveReview,
   onBackToOrders,
-  autoHideMs = 3000,
+  autoHideDurationMs = 3000,
 }: OrderCompleteAnimationProps) {
   const [isMounted, setIsMounted] = useState(open)
   const [isVisible, setIsVisible] = useState(open)
@@ -63,7 +63,7 @@ export function OrderCompleteAnimation({
     closeTimerRef.current = window.setTimeout(() => {
       onOpenChange(false)
       closeTimerRef.current = null
-    }, autoHideMs)
+    }, autoHideDurationMs)
 
     return () => {
       if (closeTimerRef.current) {
@@ -71,7 +71,7 @@ export function OrderCompleteAnimation({
         closeTimerRef.current = null
       }
     }
-  }, [autoHideMs, onOpenChange, open])
+  }, [autoHideDurationMs, onOpenChange, open])
 
   useEffect(() => {
     return () => {
