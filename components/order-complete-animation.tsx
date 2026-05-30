@@ -26,14 +26,14 @@ const CONFETTI_PARTICLES = [
 export function OrderCompleteAnimation({
   open,
   onOpenChange,
-  onLeaveReview,
-  onBackToOrders,
+  onLeaveReview = () => {},
+  onBackToOrders = () => {},
   autoHideDurationMs = 3000,
 }: OrderCompleteAnimationProps) {
   const [isMounted, setIsMounted] = useState(open)
   const [isVisible, setIsVisible] = useState(open)
-  const closeTimerRef = useRef<number | null>(null)
-  const unmountTimerRef = useRef<number | null>(null)
+  const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const unmountTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
 
   useEffect(() => {
     if (open) {
