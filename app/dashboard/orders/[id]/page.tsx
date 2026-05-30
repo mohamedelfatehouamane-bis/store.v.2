@@ -1,7 +1,7 @@
 "use client"
 
 import { KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { useLanguage } from '@/lib/language-context'
 import { normalizeStatus, ORDER_STATUS, isActiveOrderStatus, type OrderStatusValue } from '@/lib/order-status'
@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Skeleton } from '@/components/ui/skeleton'
 import { OrderTimeline } from '@/components/order-timeline'
 import { OrderEventTimeline } from '@/components/order-event-timeline'
+import { OrderCompleteAnimation } from '@/components/order-complete-animation'
 import { SellerRating } from '@/components/seller-rating'
 import { Loader2, Send } from 'lucide-react'
 import { toast } from 'sonner'
@@ -554,7 +555,7 @@ const OrderActions = memo(function OrderActions({
       </Card>
 
       {isCustomer && normalizedOrderStatus === ORDER_STATUS.COMPLETED && (
-        <Card>
+        <Card id="order-review-section">
           <CardHeader>
             <CardTitle>Order review</CardTitle>
             <CardDescription>Leave a review for your seller once the order is completed.</CardDescription>
@@ -807,6 +808,7 @@ const OrderMessages = memo(function OrderMessages({
 
 export default function OrderDetailsPage() {
   const { id } = useParams() as { id: string }
+  const router = useRouter()
   const { user } = useAuth()
   const { t } = useLanguage()
 
@@ -826,8 +828,10 @@ export default function OrderDetailsPage() {
   const [reviewError, setReviewError] = useState('')
   const [reviewSuccess, setReviewSuccess] = useState('')
   const [sellerRating, setSellerRating] = useState<{ avg: number; total: number } | null>(null)
+  const [showCompletionAnimation, setShowCompletionAnimation] = useState(false)
 
   const lastOrderSnapshotRef = useRef<string>('')
+  const previousOrderStatusRef = useRef<string>('')
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
 
   const {
@@ -1065,6 +1069,21 @@ export default function OrderDetailsPage() {
   }, [fetchReview])
 
   useEffect(() => {
+    const normalizedStatus = normalizeStatus(order?.status)
+    if (!normalizedStatus) return
+
+    if (
+      previousOrderStatusRef.current &&
+      previousOrderStatusRef.current !== ORDER_STATUS.COMPLETED &&
+      normalizedStatus === ORDER_STATUS.COMPLETED
+    ) {
+      setShowCompletionAnimation(true)
+    }
+
+    previousOrderStatusRef.current = normalizedStatus
+  }, [order?.status])
+
+  useEffect(() => {
     if (!id || !token) return
 
     const pollOrder = async () => {
@@ -1281,6 +1300,21 @@ export default function OrderDetailsPage() {
     }
   }, [existingReview, fetchSellerRating, id, reviewComment, reviewRating, token])
 
+  const handleLeaveReview = useCallback(() => {
+    setShowCompletionAnimation(false)
+    const section = document.getElementById('order-review-section')
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    router.push('/dashboard/orders')
+  }, [router])
+
+  const handleBackToOrders = useCallback(() => {
+    setShowCompletionAnimation(false)
+    router.push('/dashboard/orders')
+  }, [router])
+
   const orderView = useMemo(() => {
     if (!order) return null
 
@@ -1346,6 +1380,13 @@ export default function OrderDetailsPage() {
 
   return (
     <div className="space-y-6 p-6">
+      <OrderCompleteAnimation
+        open={showCompletionAnimation}
+        onOpenChange={setShowCompletionAnimation}
+        onLeaveReview={handleLeaveReview}
+        onBackToOrders={handleBackToOrders}
+      />
+
       <OrderHeader
         orderId={order.id}
         productName={orderView.productName}
